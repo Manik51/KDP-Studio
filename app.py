@@ -17,131 +17,208 @@ except ImportError:
     HAS_DOCX = False
 
 # ==============================================================================
-# Page Configuration & Mobile-Friendly Styling
+# Page Configuration & Advanced Cyber-Luxury SaaS Styling
 # ==============================================================================
 st.set_page_config(
-    page_title="KDP E-Book Architect Pro - Autonomous Bestseller Studio",
+    page_title="KDP E-Book Architect Pro - Bestseller Studio",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Elite SaaS UI
+# Custom Cyber-Luxury Theme (Dark Cosmos, Glassmorphism & Neon Glow)
 st.markdown("""
 <style>
-    /* Global Container */
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    /* Global Typography */
+    html, body, [class*="css"] {
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+
+    /* Background: Deep Obsidian Cosmos */
+    .stApp {
+        background: radial-gradient(circle at 10% 20%, rgba(30, 27, 75, 0.45) 0%, rgba(3, 7, 18, 0.98) 60%),
+                    radial-gradient(circle at 90% 80%, rgba(20, 83, 45, 0.2) 0%, rgba(3, 7, 18, 0.98) 60%),
+                    #030712 !important;
+        color: #f1f5f9 !important;
+    }
+
+    /* Hero Header: Luminous Glassmorphic Neon */
     .main-header {
-        background: linear-gradient(135deg, #090d16 0%, #1e293b 40%, #1e3a8a 75%, #2563eb 100%);
-        padding: 1.8rem 2rem;
-        border-radius: 14px;
-        color: white;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.75) 50%, rgba(37, 99, 235, 0.25) 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        box-shadow: 0 16px 40px -10px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+        backdrop-filter: blur(20px) !important;
+        border-radius: 18px !important;
+        padding: 2.2rem 2.4rem !important;
+        margin-bottom: 2rem !important;
     }
     .main-header h1 {
         margin: 0;
-        font-size: 2.1rem;
+        font-size: 2.3rem;
         font-weight: 800;
         letter-spacing: -0.5px;
-        color: #ffffff !important;
+        background: linear-gradient(135deg, #ffffff 0%, #dbeafe 60%, #93c5fd 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     .main-header p {
-        margin-top: 0.4rem;
+        margin-top: 0.5rem;
         font-size: 1.05rem;
-        opacity: 0.92;
-        color: #dbeafe !important;
+        color: #94a3b8 !important;
     }
 
-    /* Badges & Metrics */
+    /* Glassmorphic Metrics */
     .metric-container {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.8rem;
-        margin: 1.2rem 0;
+        gap: 1rem;
+        margin: 1.4rem 0;
     }
     .metric-card {
         flex: 1 1 150px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 0.9rem 1rem;
+        background: rgba(15, 23, 42, 0.75) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 14px !important;
+        padding: 1.1rem 1.2rem !important;
         text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+        backdrop-filter: blur(12px) !important;
     }
     .metric-value {
-        font-size: 1.4rem;
+        font-size: 1.6rem;
         font-weight: 800;
-        color: #1e3a8a;
+        background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     .metric-label {
         font-size: 0.72rem;
-        color: #64748b;
+        color: #94a3b8;
         text-transform: uppercase;
         font-weight: 700;
-        letter-spacing: 0.5px;
-        margin-top: 2px;
+        letter-spacing: 0.6px;
+        margin-top: 4px;
     }
 
-    /* Niche Opportunity Card */
+    /* Niche Opportunity Card (Cyber Neon Border) */
     .niche-card {
-        background: #f8fafc;
-        border: 1px solid #cbd5e1;
-        border-left: 5px solid #2563eb;
-        border-radius: 10px;
-        padding: 1.2rem;
-        margin-bottom: 1rem;
+        background: rgba(15, 23, 42, 0.8) !important;
+        border: 1px solid rgba(59, 130, 246, 0.35) !important;
+        border-left: 6px solid #3b82f6 !important;
+        border-radius: 14px !important;
+        padding: 1.4rem !important;
+        margin-bottom: 1.2rem !important;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+        backdrop-filter: blur(16px) !important;
     }
     .niche-badge {
         display: inline-block;
-        background: #dbeafe;
-        color: #1e40af;
-        font-weight: 700;
+        background: rgba(37, 99, 235, 0.2);
+        color: #60a5fa;
+        border: 1px solid rgba(96, 165, 250, 0.4);
+        font-weight: 800;
         font-size: 0.75rem;
-        padding: 0.2rem 0.6rem;
+        padding: 0.25rem 0.75rem;
         border-radius: 20px;
-        margin-bottom: 0.5rem;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.6rem;
     }
 
     /* Amazon Product Simulator Card */
     .amazon-sim-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+        background: rgba(15, 23, 42, 0.85) !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border-radius: 16px !important;
+        padding: 1.8rem !important;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6) !important;
         margin: 1.5rem 0;
+        backdrop-filter: blur(16px) !important;
     }
     .amazon-price-tag {
-        font-size: 1.6rem;
+        font-size: 1.7rem;
         font-weight: 800;
-        color: #b12704;
+        color: #f87171 !important;
     }
     .amazon-star-badge {
-        color: #ffa41c;
-        font-size: 1.1rem;
+        color: #fbbf24;
+        font-size: 1.15rem;
         font-weight: 700;
     }
 
+    /* Luminous Primary Buttons (Orange-Red Glowing Gradient) */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #f59e0b 0%, #ea580c 50%, #dc2626 100%) !important;
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 1rem !important;
+        border: none !important;
+        border-radius: 12px !important;
+        padding: 0.75rem 1.6rem !important;
+        box-shadow: 0 6px 24px rgba(234, 88, 12, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+        transition: all 0.25s ease-in-out !important;
+        letter-spacing: 0.3px !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 32px rgba(234, 88, 12, 0.65) !important;
+    }
+
+    /* Secondary Buttons */
+    .stButton > button {
+        background: rgba(30, 41, 59, 0.8) !important;
+        color: #f8fafc !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease !important;
+    }
+    .stButton > button:hover {
+        background: rgba(51, 65, 85, 0.9) !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        color: #ffffff !important;
+    }
+
+    /* Sleek Input Fields */
+    .stTextInput > div > div > input, .stSelectbox > div > div > div {
+        background: rgba(15, 23, 42, 0.85) !important;
+        border: 1px solid rgba(255, 255, 255, 0.14) !important;
+        border-radius: 10px !important;
+        color: #ffffff !important;
+        font-size: 0.95rem !important;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #f59e0b !important;
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25) !important;
+    }
+
+    /* Sidebar Frost */
+    [data-testid="stSidebar"] {
+        background: rgba(3, 7, 18, 0.94) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+        backdrop-filter: blur(20px) !important;
+    }
     .sidebar-note {
         font-size: 0.82rem;
-        background: #f1f5f9;
-        border-left: 3px solid #2563eb;
-        padding: 0.6rem;
-        border-radius: 0 6px 6px 0;
+        background: rgba(30, 41, 59, 0.7);
+        border-left: 3px solid #3b82f6;
+        padding: 0.65rem 0.8rem;
+        border-radius: 0 8px 8px 0;
         margin-top: 0.4rem;
         margin-bottom: 0.6rem;
+        color: #cbd5e1;
     }
     .key-saved-badge {
         display: inline-block;
-        background: #dcfce7;
-        color: #166534;
-        border: 1px solid #86efac;
-        padding: 0.2rem 0.5rem;
+        background: rgba(22, 101, 52, 0.3);
+        color: #4ade80;
+        border: 1px solid rgba(74, 222, 128, 0.4);
+        padding: 0.25rem 0.6rem;
         border-radius: 6px;
         font-size: 0.75rem;
-        font-weight: 600;
-        margin-bottom: 0.4rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -151,14 +228,14 @@ st.markdown("""
 # ==============================================================================
 PROVIDERS = {
     "Google Gemini": {
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"],
+        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
         "default_model": "gemini-3.8-flash",
-        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/interactions",
         "key_url": "https://aistudio.google.com/",
         "key_label": "Google AI Studio",
         "key_prefix": "AIza",
         "secret_name": "GEMINI_API_KEY",
-        "description": "⭐ RECOMMENDED FOR FULL BOOKS! 1 Million TPM free limit (never hits rate limits)."
+        "description": "⭐ RECOMMENDED FOR FULL BOOKS! Powered by Google Interactions API (1 Million TPM free limit)."
     },
     "Groq": {
         "models": ["llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
@@ -380,7 +457,7 @@ def fetch_live_gemini_models(api_key: str) -> list[str]:
     """Dynamically fetches active models available for this user's Google AI Studio key."""
     cleaned = clean_api_key(api_key)
     if not cleaned:
-        return ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+        return ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
     try:
         r = requests.get(
             f"https://generativelanguage.googleapis.com/v1beta/models?key={cleaned}",
@@ -390,7 +467,7 @@ def fetch_live_gemini_models(api_key: str) -> list[str]:
         if r.status_code == 200:
             models_data = r.json().get("models", [])
             valid_models = []
-            deprecated_tokens = ["gemini-1.", "gemini-2.0", "pro-latest", "pro-vision", "1.0", "embed", "aqa", "imagen"]
+            deprecated_tokens = ["gemini-1.", "gemini-2.", "pro-latest", "pro-vision", "1.0", "embed", "aqa", "imagen"]
             for m in models_data:
                 name = m.get("name", "").replace("models/", "")
                 methods = m.get("supportedGenerationMethods", [])
@@ -398,7 +475,7 @@ def fetch_live_gemini_models(api_key: str) -> list[str]:
                     if not any(t in name.lower() for t in deprecated_tokens):
                         valid_models.append(name)
             if valid_models:
-                preferred = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+                preferred = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
                 sorted_models = [p for p in preferred if p in valid_models]
                 for m in valid_models:
                     if m not in sorted_models and "pro" not in m:
@@ -410,7 +487,7 @@ def fetch_live_gemini_models(api_key: str) -> list[str]:
                     return sorted_models
     except Exception:
         pass
-    return ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+    return ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -480,26 +557,84 @@ def parse_api_error(status_code: int, response_text: str) -> str:
 
 
 def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
-    """Bulletproof dual-endpoint Google Gemini caller with automatic 2026 model fallback."""
+    """Bulletproof dual-endpoint Google Gemini caller with Interactions API (Flagship) + generateContent fallback."""
     cleaned_key = clean_api_key(api_key)
     if not cleaned_key:
         raise ValueError("Google Gemini API Key is missing. Please enter your key in the sidebar.")
 
     target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-3.8-flash"
 
-    # If target_model is known deprecated/retired or has given 404, immediately swap to gemini-3.8-flash
-    if any(t in target_model.lower() for t in ["1.5", "2.0", "pro-latest", "pro-vision", "1.0"]):
+    # Eliminate all known deprecated models
+    if any(t in target_model.lower() for t in ["1.", "2.", "pro-latest", "pro-vision", "1.0"]):
         target_model = "gemini-3.8-flash"
 
     candidates = [target_model]
-    for fallback in ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]:
+    for fallback in ["gemini-3.8-flash", "gemini-3.5-flash-lite"]:
         if fallback not in candidates:
             candidates.append(fallback)
 
     last_error = ""
+    combined_input = f"{system_prompt}\n\n{user_prompt}" if system_prompt and system_prompt.strip() else user_prompt
 
     for current_model in candidates:
-        # METHOD 1: Google Native REST API (Zero rate limits, 1 Million TPM free limit)
+        # METHOD 1: Google Interactions API (Official modern 2026 flagship API for gemini-3.8-flash)
+        interactions_url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        headers_interactions = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": cleaned_key
+        }
+
+        # Try Interactions API with string input
+        try:
+            r = requests.post(
+                interactions_url,
+                headers=headers_interactions,
+                json={"model": current_model, "input": combined_input},
+                timeout=180
+            )
+            if r.status_code == 200:
+                data = r.json()
+                outputs = data.get("outputs", [])
+                if outputs and isinstance(outputs, list):
+                    first = outputs[0]
+                    if isinstance(first, dict):
+                        t = first.get("text", "")
+                        if t:
+                            return t.strip()
+                    elif isinstance(first, str):
+                        return first.strip()
+                if "text" in data:
+                    return str(data["text"]).strip()
+            elif r.status_code == 400 and ("API key not valid" in r.text or "API_KEY_INVALID" in r.text):
+                raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
+            else:
+                last_error = parse_api_error(r.status_code, r.text)
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+
+        # Try Interactions API with parts input format
+        try:
+            r = requests.post(
+                interactions_url,
+                headers=headers_interactions,
+                json={"model": current_model, "input": {"parts": [{"text": combined_input}]}},
+                timeout=180
+            )
+            if r.status_code == 200:
+                data = r.json()
+                outputs = data.get("outputs", [])
+                if outputs and isinstance(outputs, list):
+                    first = outputs[0]
+                    if isinstance(first, dict):
+                        t = first.get("text", "")
+                        if t:
+                            return t.strip()
+            elif r.status_code == 400 and ("API key not valid" in r.text or "API_KEY_INVALID" in r.text):
+                raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
+        except requests.exceptions.RequestException:
+            pass
+
+        # METHOD 2: generateContent fallback
         native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent?key={cleaned_key}"
         native_headers = {
             "Content-Type": "application/json",
@@ -529,52 +664,14 @@ def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: 
                     parts = items[0].get("content", {}).get("parts", [])
                     if parts:
                         return parts[0].get("text", "").strip()
-            elif r.status_code == 400:
-                if "API key not valid" in r.text or "API_KEY_INVALID" in r.text:
-                    raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
-                last_error = parse_api_error(r.status_code, r.text)
-            elif r.status_code in (404, 429, 500, 503):
-                last_error = parse_api_error(r.status_code, r.text)
-                continue
+            elif r.status_code == 400 and ("API key not valid" in r.text or "API_KEY_INVALID" in r.text):
+                raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
             else:
                 last_error = parse_api_error(r.status_code, r.text)
         except requests.exceptions.RequestException as e:
             last_error = str(e)
 
-        # METHOD 2: Google OpenAI-compatible endpoint fallback for current_model
-        headers = {
-            "Authorization": f"Bearer {cleaned_key}",
-            "Content-Type": "application/json"
-        }
-        messages = []
-        if system_prompt and system_prompt.strip():
-            messages.append({"role": "system", "content": system_prompt.strip()})
-        messages.append({"role": "user", "content": user_prompt})
-
-        payload = {
-            "model": current_model,
-            "messages": messages,
-            "temperature": temperature
-        }
-        try:
-            r2 = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=180
-            )
-            if r2.status_code == 200:
-                data = r2.json()
-                return data["choices"][0]["message"]["content"].strip()
-            elif r2.status_code in (404, 429, 500, 503):
-                last_error = parse_api_error(r2.status_code, r2.text)
-                continue
-            else:
-                last_error = parse_api_error(r2.status_code, r2.text)
-        except requests.exceptions.RequestException as e:
-            last_error = str(e)
-
-    raise RuntimeError(f"Google Gemini Error: {last_error or 'All Gemini model candidates failed. Please verify your API key at https://aistudio.google.com/'}")
+    raise RuntimeError(f"Google Gemini Error: {last_error or 'Could not complete request. Please verify your API key at https://aistudio.google.com/'}")
 
 
 def call_openrouter(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
@@ -865,7 +962,6 @@ def generate_paperback_wraparound(
     base = Image.new("RGB", (total_w, h), theme["bg_top"])
     draw = ImageDraw.Draw(base)
 
-    # Background gradient across entire cover
     r1, g1, b1 = theme["bg_top"]
     r2, g2, b2 = theme["bg_bot"]
     for y in range(h):
@@ -878,7 +974,6 @@ def generate_paperback_wraparound(
     draw.line([(spine_x1, 0), (spine_x1, h)], fill=theme["accent_color"], width=4)
     draw.line([(spine_x2, 0), (spine_x2, h)], fill=theme["accent_color"], width=4)
 
-    # Fonts
     try:
         title_font = ImageFont.load_default(size=72)
         blurb_font = ImageFont.load_default(size=44)
@@ -1003,7 +1098,6 @@ def create_docx_manuscript(
         ch_text = ch.get("content", "")
         img_bytes = ch.get("image_bytes")
 
-        # Embed Chapter Illustration if present
         if img_bytes:
             try:
                 img_stream = io.BytesIO(img_bytes)
@@ -1170,7 +1264,7 @@ with st.sidebar:
         f"""
         <div class="sidebar-note">
             <strong>Active Model:</strong> <code>{active_model}</code><br>
-            <span style="font-size: 0.8rem; color: #475569;">{selected_config['description']}</span>
+            <span style="font-size: 0.8rem; color: #94a3b8;">{selected_config['description']}</span>
         </div>
         """,
         unsafe_allow_html=True
@@ -1222,7 +1316,7 @@ if "selected_subtitle" not in st.session_state:
 if "selected_audience" not in st.session_state:
     st.session_state.selected_audience = ""
 
-# Navigation Tabs: Studio vs Instant Cover Studio vs Guide
+# Navigation Tabs
 tab_studio, tab_cover_lab, tab_guide = st.tabs([
     "🚀 Autonomous Publishing Studio",
     "🎨 Built-in Cover Studio (JPG & PDF)",
@@ -1295,13 +1389,13 @@ Provide all 3 niches following this exact structure.
                 st.markdown(f"""
                 <div class="niche-card">
                     <span class="niche-badge">OPPORTUNITY #{idx}</span>
-                    <h3 style="margin: 0.2rem 0; color: #1e3a8a;">{n.get('topic', '')}</h3>
-                    <p style="margin: 0.2rem 0 0.6rem 0; font-size: 0.95rem; color: #475569;"><em>{n.get('subtitle', '')}</em></p>
+                    <h3 style="margin: 0.2rem 0; color: #60a5fa;">{n.get('topic', '')}</h3>
+                    <p style="margin: 0.2rem 0 0.6rem 0; font-size: 0.95rem; color: #94a3b8;"><em>{n.get('subtitle', '')}</em></p>
                     <div style="font-size: 0.88rem; margin-bottom: 0.6rem;">
                         <strong>Target Audience:</strong> {n.get('audience', '')}<br>
-                        <strong>Estimated BSR Potential:</strong> <span style="color: #166534; font-weight: 700;">{n.get('bsr', 'Under 50,000')}</span> |
+                        <strong>Estimated BSR Potential:</strong> <span style="color: #4ade80; font-weight: 700;">{n.get('bsr', 'Under 50,000')}</span> |
                         <strong>Competition:</strong> {n.get('competition', 'Low')} |
-                        <strong>Viability Score:</strong> <span style="color: #b45309; font-weight: 700;">{n.get('score', '9/10')}</span><br>
+                        <strong>Viability Score:</strong> <span style="color: #fbbf24; font-weight: 700;">{n.get('score', '9/10')}</span><br>
                         <strong>Recommended 7 Keywords:</strong> <code>{n.get('keywords', '')}</code><br>
                         <strong>Why It Sells:</strong> {n.get('hook', '')}
                     </div>
@@ -1518,7 +1612,6 @@ Generate the complete launch suite with the following 6 sections:
             cover_title = topic_input.strip()
             cover_subtitle = subtitle_input.strip() if subtitle_input else (audience_input.strip() if audience_input else "A Practical Step-by-Step Blueprint")
 
-            # Fetch AI cover art background if desired
             cover_art_prompt = f"minimalist luxury book cover art concept for {topic_input.strip()} dramatic lighting gold and dark palette cinematic 8k"
             cover_art_bg = fetch_ai_image(cover_art_prompt, width=1600, height=2560)
 
@@ -1530,7 +1623,6 @@ Generate the complete launch suite with the following 6 sections:
                 bg_art_bytes=cover_art_bg
             )
 
-            # Paperback wraparound PDF
             wrap_pdf_bytes = generate_paperback_wraparound(
                 title=cover_title,
                 subtitle=cover_subtitle,
@@ -1540,7 +1632,6 @@ Generate the complete launch suite with the following 6 sections:
                 chapters_count=chapters_count
             )
 
-            # Front & Back Matter
             front_matter = f"""# {topic_input.strip()}
 ### {cover_subtitle}
 **By {author_input.strip()}**
@@ -1579,7 +1670,6 @@ Visit our reader portal to claim your companion checklists and workbook template
             all_chapters_formatted = "\n\n---\n\n".join([ch["content"] for ch in chapters_list])
             master_manuscript = f"{front_matter}\n\n# Table of Contents\n{phase2_output}\n\n---\n\n{all_chapters_formatted}\n{back_matter}"
 
-            # Generate Microsoft Word (.docx) document with embedded images
             docx_bytes = create_docx_manuscript(
                 title=topic_input.strip(),
                 subtitle=cover_subtitle,
@@ -1588,7 +1678,6 @@ Visit our reader portal to claim your companion checklists and workbook template
                 chapters_list=chapters_list
             )
 
-            # Prepare Quick Copy-Paste KDP Metadata Sheet
             kdp_sheet = f"""================================================================================
 AMAZON KDP FAST-LAUNCH METADATA SHEET
 Topic: {topic_input.strip()}
@@ -1774,17 +1863,17 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
             st.markdown(f"""
             <div class="amazon-sim-card">
                 <span style="background: #e67a00; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">#1 Best Seller</span>
-                <span style="font-size: 0.85rem; color: #565959;"> in Non-Fiction & Guides</span>
-                <h2 style="margin: 0.4rem 0 0.2rem 0; color: #0f1111; font-size: 1.6rem;">{data['topic']}</h2>
-                <h4 style="margin: 0 0 0.5rem 0; color: #565959; font-weight: 500; font-size: 1rem;">{data.get('subtitle', '')}</h4>
-                <p style="margin: 0 0 0.4rem 0; font-size: 0.9rem;">by <strong style="color: #007185;">{data['author']}</strong> (Author)</p>
-                <div class="amazon-star-badge">★★★★★ <span style="font-size: 0.9rem; color: #007185;">4.9 out of 5 stars (1,842 ratings)</span></div>
-                <hr style="margin: 0.8rem 0; border: none; border-top: 1px solid #e2e8f0;">
+                <span style="font-size: 0.85rem; color: #94a3b8;"> in Non-Fiction & Guides</span>
+                <h2 style="margin: 0.4rem 0 0.2rem 0; color: #ffffff; font-size: 1.6rem;">{data['topic']}</h2>
+                <h4 style="margin: 0 0 0.5rem 0; color: #94a3b8; font-weight: 500; font-size: 1rem;">{data.get('subtitle', '')}</h4>
+                <p style="margin: 0 0 0.4rem 0; font-size: 0.9rem;">by <strong style="color: #60a5fa;">{data['author']}</strong> (Author)</p>
+                <div class="amazon-star-badge">★★★★★ <span style="font-size: 0.9rem; color: #60a5fa;">4.9 out of 5 stars (1,842 ratings)</span></div>
+                <hr style="margin: 0.8rem 0; border: none; border-top: 1px solid rgba(255,255,255,0.1);">
                 <div style="display: flex; gap: 1rem; align-items: baseline;">
-                    <div><span class="amazon-price-tag">$4.99</span> <span style="font-size: 0.85rem; color: #565959;">Kindle Price</span></div>
-                    <div style="font-size: 0.85rem; color: #007600; font-weight: 700;">✓ Available on Kindle Unlimited ($0.00)</div>
+                    <div><span class="amazon-price-tag">$4.99</span> <span style="font-size: 0.85rem; color: #94a3b8;">Kindle Price</span></div>
+                    <div style="font-size: 0.85rem; color: #4ade80; font-weight: 700;">✓ Available on Kindle Unlimited ($0.00)</div>
                 </div>
-                <p style="font-size: 0.85rem; color: #565959; margin-top: 0.3rem;">Print length: ~{max(20, round(total_words / 250))} pages • Estimated read: {est_read_time} mins</p>
+                <p style="font-size: 0.85rem; color: #94a3b8; margin-top: 0.3rem;">Print length: ~{max(20, round(total_words / 250))} pages • Estimated read: {est_read_time} mins</p>
             </div>
             """, unsafe_allow_html=True)
 
