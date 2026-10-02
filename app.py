@@ -96,6 +96,16 @@ st.markdown("""
 # Supported Free LLM Providers with Multi-Model Support
 # ==============================================================================
 PROVIDERS = {
+    "Google Gemini": {
+        "models": ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+        "default_model": "gemini-1.5-flash",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "key_url": "https://aistudio.google.com/",
+        "key_label": "Google AI Studio",
+        "key_prefix": "AIza",
+        "secret_name": "GEMINI_API_KEY",
+        "description": "⭐ RECOMMENDED FOR FULL BOOKS! 1 Million TPM free limit (never hits rate limits)."
+    },
     "Groq": {
         "models": ["llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
         "default_model": "llama-3.1-8b-instant",
@@ -104,27 +114,17 @@ PROVIDERS = {
         "key_label": "Groq Cloud Console",
         "key_prefix": "gsk_",
         "secret_name": "GROQ_API_KEY",
-        "description": "Ultra-fast inference on Groq LPUs. Dynamically queries active models on your account."
-    },
-    "Google Gemini": {
-        "models": ["gemini-1.5-flash", "gemini-2.0-flash"],
-        "default_model": "gemini-1.5-flash",
-        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "key_url": "https://aistudio.google.com/",
-        "key_label": "Google AI Studio",
-        "key_prefix": "AIza",
-        "secret_name": "GEMINI_API_KEY",
-        "description": "High-throughput and generous free tier via OpenAI-compatible endpoint."
+        "description": "Ultra-fast inference on Groq LPUs. (Subject to Groq free-tier rate limits)."
     },
     "OpenRouter": {
-        "models": ["meta-llama/llama-3.3-70b-instruct:free"],
-        "default_model": "meta-llama/llama-3.3-70b-instruct:free",
+        "models": ["openrouter/free", "qwen/qwen3.8-27b:free", "nvidia/nemotron-3.5-lightning:free", "liquid/lfm-2.5-2.6b:free"],
+        "default_model": "openrouter/free",
         "endpoint": "https://openrouter.ai/api/v1/chat/completions",
         "key_url": "https://openrouter.ai/keys",
         "key_label": "OpenRouter Keys",
         "key_prefix": "sk-or-",
         "secret_name": "OPENROUTER_API_KEY",
-        "description": "Aggregated gateway using Meta Llama 3.3 70B Free tier."
+        "description": "Aggregated gateway using openrouter/free router and active open models."
     }
 }
 
@@ -298,90 +298,167 @@ def fetch_live_groq_models(api_key: str) -> list[str]:
     return []
 
 
-def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[bool, str]:
-    """Tests the API connection with a lightweight prompt."""
-    cleaned = clean_api_key(api_key)
-    if not cleaned:
-        return False, "API key is empty."
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_live_openrouter_models() -> list[str]:
+    """Fetches real-time active free models from OpenRouter."""
+    try:
+        r = requests.get("https://openrouter.ai/api/v1/models", timeout=6)
+        if r.status_code == 200:
+            free_models = [m["id"] for m in r.json().get("data", []) if ":free" in m.get("id", "")]
+            if free_models:
+                return ["openrouter/free"] + sorted(free_models)
+    except Exception:
+        pass
+    return ["openrouter/free", "qwen/qwen3.8-27b:free", "nvidia/nemotron-3.5-lightning:free"]
 
-    config = PROVIDERS.get(provider)
-    if not config:
-        return False, f"Unknown provider {provider}."
 
-    # Format verification
-    if provider == "Groq" and not cleaned.startswith("gsk_"):
-        return False, "Groq API keys must start with 'gsk_'. Please copy the key from https://console.groq.com/keys"
+def parse_api_error(status_code: int, response_text: str) -> str:
+    """Extracts human-readable error messages from dict, list, or plain text."""
+    import json
+    msg = f"HTTP {status_code}"
+    try:
+        data = json.loads(response_text)
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            data = data[0]
+        if isinstance(data, dict):
+            if "error" in data:
+                err_obj = data["error"]
+                if isinstance(err_obj, dict):
+                    msg += f": {err_obj.get('message', str(err_obj))}"
+                else:
+                    msg += f": {str(err_obj)}"
+            elif "message" in data:
+                msg += f": {data['message']}"
+            else:
+                msg += f": {response_text[:160]}"
+        else:
+            msg += f": {response_text[:160]}"
+    except Exception:
+        msg += f": {response_text[:160]}"
+    return msg
 
-    headers = {
-        "Authorization": f"Bearer {cleaned}",
-        "Content-Type": "application/json"
-    }
-    if provider == "OpenRouter":
-        headers["HTTP-Referer"] = "https://kdp-architect.local"
-        headers["X-Title"] = "KDP E-Book Architect Pro"
 
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": "Reply with 'OK'."}],
-        "max_tokens": 10
+def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
+    """Bulletproof dual-endpoint Google Gemini caller (Native REST + OpenAI fallback)."""
+    cleaned_key = clean_api_key(api_key)
+    if not cleaned_key:
+        raise ValueError("Google Gemini API Key is missing. Please enter your key in the sidebar.")
+
+    target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-1.5-flash"
+
+    # METHOD 1: Google Native REST API (The most reliable, zero rate-limit issues, 1 Million TPM)
+    native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={cleaned_key}"
+    native_payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "parts": [{"text": user_prompt}]
+            }
+        ],
+        "generationConfig": {
+            "temperature": temperature
+        }
     }
 
     try:
-        r = requests.post(config["endpoint"], headers=headers, json=payload, timeout=20)
+        r = requests.post(native_url, json=native_payload, timeout=180)
         if r.status_code == 200:
-            return True, f"Connection verified! Model '{model_name}' is ready."
+            res_data = r.json()
+            candidates = res_data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+        elif r.status_code == 400 and "API key not valid" in r.text:
+            raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
+    except requests.exceptions.RequestException:
+        pass
 
-        err_detail = f"HTTP {r.status_code}"
-        try:
-            j = r.json()
-            if "error" in j:
-                detail = j["error"].get("message", r.text)
-                err_detail = f"{err_detail}: {detail}"
-            else:
-                err_detail = f"{err_detail}: {r.text[:150]}"
-        except Exception:
-            err_detail = f"{err_detail}: {r.text[:150]}"
+    # METHOD 2: Google OpenAI-compatible endpoint fallback
+    headers = {
+        "Authorization": f"Bearer {cleaned_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": target_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": temperature
+    }
+    try:
+        r2 = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=180
+        )
+        if r2.status_code == 200:
+            data = r2.json()
+            return data["choices"][0]["message"]["content"].strip()
+        else:
+            err = parse_api_error(r2.status_code, r2.text)
+            raise RuntimeError(f"Google Gemini Error: {err}")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Network error connecting to Google Gemini: {str(e)}")
 
-        if r.status_code == 404 and provider == "Groq":
-            live = fetch_live_groq_models(cleaned)
-            if live:
-                err_detail += f" (Model '{model_name}' is retired. Select an active model from the dropdown: {', '.join(live[:3])})."
-            else:
-                err_detail += f" (Model '{model_name}' does not exist on Groq. Please choose another model from the dropdown)."
-        elif r.status_code == 401:
-            err_detail += " (Invalid API key. Check key in your provider console)."
-        elif r.status_code == 429:
-            err_detail += " (Rate limit exceeded. Switch model or wait 1 minute)."
 
-        return False, err_detail
-    except Exception as e:
-        return False, f"Network error: {str(e)}"
-
-
-# ==============================================================================
-# Helper Functions: LLM, Text & File Sanitization
-# ==============================================================================
-def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
-    """Sends a chat completion request to the chosen LLM provider."""
+def call_openrouter(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
+    """Bulletproof OpenRouter caller with auto-fallback to openrouter/free."""
     cleaned_key = clean_api_key(api_key)
     if not cleaned_key:
-        raise ValueError("API Key is missing. Please enter and save your API key in the sidebar.")
+        raise ValueError("OpenRouter API Key is missing. Please enter your key in the sidebar.")
 
-    config = PROVIDERS.get(provider)
-    if not config:
-        raise ValueError(f"Unknown provider '{provider}'.")
+    headers = {
+        "Authorization": f"Bearer {cleaned_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://kdp-architect.local",
+        "X-Title": "KDP E-Book Architect Pro"
+    }
 
-    if provider == "Groq" and not cleaned_key.startswith("gsk_"):
-        raise ValueError("Groq API key is invalid (must start with 'gsk_'). Please verify your key at https://console.groq.com/keys")
+    target_model = model_name if model_name else "openrouter/free"
+    payload = {
+        "model": target_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": temperature
+    }
+
+    try:
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=180)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+
+        # If model retired or unavailable, auto-fallback to openrouter/free
+        if r.status_code in (400, 404) and target_model != "openrouter/free":
+            payload["model"] = "openrouter/free"
+            r2 = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=180)
+            if r2.status_code == 200:
+                return r2.json()["choices"][0]["message"]["content"].strip()
+
+        err = parse_api_error(r.status_code, r.text)
+        if r.status_code == 401:
+            err += " (Invalid OpenRouter API Key. Get free key at https://openrouter.ai/keys)"
+        raise RuntimeError(f"OpenRouter Error: {err}")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Network error connecting to OpenRouter: {str(e)}")
+
+
+def call_groq(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
+    """Bulletproof Groq caller with rate-limit and 404 auto-recovery."""
+    cleaned_key = clean_api_key(api_key)
+    if not cleaned_key:
+        raise ValueError("Groq API Key is missing. Please enter your key in the sidebar.")
 
     headers = {
         "Authorization": f"Bearer {cleaned_key}",
         "Content-Type": "application/json"
     }
-
-    if provider == "OpenRouter":
-        headers["HTTP-Referer"] = "https://kdp-architect.local"
-        headers["X-Title"] = "KDP E-Book Architect Pro"
 
     payload = {
         "model": model_name,
@@ -393,59 +470,45 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
     }
 
     try:
-        response = requests.post(config["endpoint"], headers=headers, json=payload, timeout=180)
-    except requests.exceptions.Timeout:
-        raise RuntimeError("Request timed out after 180s. Please try again.")
-    except requests.exceptions.ConnectionError:
-        raise RuntimeError("Network connection error. Check your internet connection.")
+        r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=180)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+
+        # If rate limit (429) or model retired (404), auto-switch to 8B instant!
+        if r.status_code in (429, 404):
+            time.sleep(2)
+            payload["model"] = "llama-3.1-8b-instant"
+            r2 = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=180)
+            if r2.status_code == 200:
+                return r2.json()["choices"][0]["message"]["content"].strip()
+
+        err = parse_api_error(r.status_code, r.text)
+        if r.status_code == 429:
+            err += " (Groq free tier limit reached! Please switch to Google Gemini in the sidebar for 1 Million tokens/min without limits)."
+        raise RuntimeError(f"Groq Error: {err}")
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Network error: {str(e)}")
+        raise RuntimeError(f"Network error connecting to Groq: {str(e)}")
 
-    if response.status_code != 200:
-        # Automatic recovery for Groq: if model is retired (404) or rate-limited (429)
-        if provider == "Groq" and response.status_code in (404, 429):
-            time.sleep(1)
-            live = fetch_live_groq_models(cleaned_key)
-            fallback_model = "llama-3.1-8b-instant"
-            if live:
-                for candidate in live:
-                    if candidate != model_name:
-                        fallback_model = candidate
-                        break
-            payload["model"] = fallback_model
-            fallback_resp = requests.post(config["endpoint"], headers=headers, json=payload, timeout=180)
-            if fallback_resp.status_code == 200:
-                res_data = fallback_resp.json()
-                return res_data["choices"][0]["message"]["content"].strip()
 
-        error_msg = f"HTTP Error {response.status_code}"
-        try:
-            err_json = response.json()
-            if "error" in err_json:
-                detail = err_json["error"].get("message", response.text)
-                error_msg += f": {detail}"
-            else:
-                error_msg += f": {response.text[:200]}"
-        except Exception:
-            error_msg += f": {response.text[:200]}"
+def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
+    """Master LLM dispatcher: Routes to bulletproof provider handlers."""
+    if provider == "Google Gemini":
+        return call_gemini(system_prompt, user_prompt, api_key, model_name, temperature)
+    elif provider == "OpenRouter":
+        return call_openrouter(system_prompt, user_prompt, api_key, model_name, temperature)
+    else:
+        return call_groq(system_prompt, user_prompt, api_key, model_name, temperature)
 
-        if response.status_code == 404 and provider == "Groq":
-            error_msg += " (Model was retired by Groq. Please select an active model from the sidebar dropdown)."
-        elif response.status_code == 401:
-            error_msg += " (Invalid API key. Check key on your provider console)."
-        elif response.status_code == 429:
-            error_msg += " (Rate limit or TPM limit hit. Switch to an instant model or Google Gemini)."
 
-        raise RuntimeError(error_msg)
-
+def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[bool, str]:
+    """Tests the connection using the exact call_llm function."""
     try:
-        res_data = response.json()
-        content = res_data["choices"][0]["message"]["content"]
-        if not content:
-            raise ValueError("LLM returned empty content.")
-        return content.strip()
-    except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError(f"Failed to parse response: {str(e)} | Raw: {response.text[:200]}")
+        res = call_llm("You are a connection tester.", "Reply with 'OK'.", provider, api_key, model_name)
+        if res:
+            return True, f"Connection verified! {provider} ('{model_name}') is 100% active and ready."
+        return False, "Received empty response from provider."
+    except Exception as e:
+        return False, str(e)
 
 
 def sanitize_filename(name: str) -> str:
@@ -603,12 +666,16 @@ with st.sidebar:
     if provider_choice == "Groq" and cleaned_input and not cleaned_input.startswith("gsk_"):
         st.warning("⚠️ Groq keys must start with `gsk_`. You may have copied the wrong text.")
 
-    # Dynamically query active models from Groq using user's key
+    # Dynamically query active models from Groq or OpenRouter
     available_models = list(selected_config["models"])
     if provider_choice == "Groq" and cleaned_input:
         live_groq = fetch_live_groq_models(cleaned_input)
         if live_groq:
             available_models = live_groq
+    elif provider_choice == "OpenRouter":
+        live_or = fetch_live_openrouter_models()
+        if live_or:
+            available_models = live_or
 
     # Model Selector for Selected Provider
     active_model = st.selectbox(
