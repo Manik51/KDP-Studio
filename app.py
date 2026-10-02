@@ -13,7 +13,7 @@ st.set_page_config(
     page_title="KDP E-Book Architect Pro - AI Publishing Studio",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Mobile friendly default
+    initial_sidebar_state="expanded"
 )
 
 # Custom CSS for Premium, Mobile-Optimized UI
@@ -43,14 +43,6 @@ st.markdown("""
     }
 
     /* Badges & Cards */
-    .niche-card {
-        background: #f8fafc;
-        border: 1px solid #cbd5e1;
-        border-left: 4px solid #3b82f6;
-        border-radius: 8px;
-        padding: 1rem 1.2rem;
-        margin-bottom: 1rem;
-    }
     .metric-container {
         display: flex;
         flex-wrap: wrap;
@@ -84,38 +76,58 @@ st.markdown("""
         padding: 0.6rem;
         border-radius: 0 6px 6px 0;
         margin-top: 0.4rem;
+        margin-bottom: 0.6rem;
+    }
+    .key-saved-badge {
+        display: inline-block;
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+        padding: 0.2rem 0.5rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-bottom: 0.4rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# Supported Free LLM Providers
+# Supported Free LLM Providers with Multi-Model Support
 # ==============================================================================
 PROVIDERS = {
-    "Google Gemini": {
-        "model": "gemini-1.5-flash",
-        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "key_url": "https://aistudio.google.com/",
-        "key_label": "Google AI Studio",
-        "description": "High-speed and generous free tier via OpenAI-compatible endpoint."
-    },
     "Groq": {
-        "model": "llama-3.3-70b-versatile",
+        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "default_model": "llama-3.3-70b-versatile",
         "endpoint": "https://api.groq.com/openai/v1/chat/completions",
         "key_url": "https://console.groq.com/keys",
         "key_label": "Groq Cloud Console",
-        "description": "Ultra-fast inference with Llama 3.3 70B on Groq LPUs."
+        "key_prefix": "gsk_",
+        "secret_name": "GROQ_API_KEY",
+        "description": "Ultra-fast inference on Groq LPUs. Supports Llama 3.3 70B & high-limit 8B."
+    },
+    "Google Gemini": {
+        "models": ["gemini-1.5-flash", "gemini-2.0-flash"],
+        "default_model": "gemini-1.5-flash",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "key_url": "https://aistudio.google.com/",
+        "key_label": "Google AI Studio",
+        "key_prefix": "AIza",
+        "secret_name": "GEMINI_API_KEY",
+        "description": "High-throughput and generous free tier via OpenAI-compatible endpoint."
     },
     "OpenRouter": {
-        "model": "meta-llama/llama-3.3-70b-instruct:free",
+        "models": ["meta-llama/llama-3.3-70b-instruct:free"],
+        "default_model": "meta-llama/llama-3.3-70b-instruct:free",
         "endpoint": "https://openrouter.ai/api/v1/chat/completions",
         "key_url": "https://openrouter.ai/keys",
         "key_label": "OpenRouter Keys",
+        "key_prefix": "sk-or-",
+        "secret_name": "OPENROUTER_API_KEY",
         "description": "Aggregated gateway using Meta Llama 3.3 70B Free tier."
     }
 }
 
-# Pre-set categories for Niche Hunting
 SEED_CATEGORIES = [
     "Personal Finance & Wealth Habits",
     "AI, Productivity & Freelancing",
@@ -127,7 +139,6 @@ SEED_CATEGORIES = [
     "Career Advancement & Remote Work Skills"
 ]
 
-# Cover Studio Color Themes
 COVER_THEMES = {
     "Midnight Executive": {
         "bg_top": (15, 23, 42),      # Dark Slate
@@ -160,19 +171,150 @@ COVER_THEMES = {
 }
 
 # ==============================================================================
+# API Key Sanitization, Storage & Persistence Helpers
+# ==============================================================================
+def clean_api_key(raw_key: str) -> str:
+    """Strips accidental quotes, spaces, newlines, and 'Bearer ' prefixes."""
+    if not raw_key:
+        return ""
+    k = raw_key.strip()
+    if (k.startswith('"') and k.endswith('"')) or (k.startswith("'") and k.endswith("'")):
+        k = k[1:-1].strip()
+    if k.lower().startswith("bearer "):
+        k = k[7:].strip()
+    return k
+
+
+def get_persisted_key(provider: str) -> str:
+    """Retrieves key from st.secrets, local secrets.toml, or session state."""
+    config = PROVIDERS.get(provider, {})
+    env_var = config.get("secret_name", "")
+
+    # 1. Check Streamlit Secrets (for Streamlit Cloud deployments)
+    try:
+        if env_var in st.secrets:
+            val = str(st.secrets[env_var]).strip()
+            if val:
+                return val
+    except Exception:
+        pass
+
+    # 2. Check local .streamlit/secrets.toml
+    secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+    if os.path.exists(secrets_path):
+        try:
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                match = re.search(rf'{env_var}\s*=\s*["\']([^"\']+)["\']', content)
+                if match:
+                    return match.group(1).strip()
+        except Exception:
+            pass
+
+    # 3. Check Session State
+    return st.session_state.get(f"key_{provider}", "")
+
+
+def save_key_locally(provider: str, key_val: str):
+    """Saves API key to .streamlit/secrets.toml so it persists across page refreshes."""
+    config = PROVIDERS.get(provider, {})
+    env_var = config.get("secret_name", "")
+    if not env_var or not key_val:
+        return
+
+    os.makedirs(os.path.join(os.getcwd(), ".streamlit"), exist_ok=True)
+    secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+
+    existing = {}
+    if os.path.exists(secrets_path):
+        try:
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    m = re.match(r'([A-Za-z0-9_]+)\s*=\s*["\']([^"\']+)["\']', line.strip())
+                    if m:
+                        existing[m.group(1)] = m.group(2)
+        except Exception:
+            pass
+
+    existing[env_var] = key_val
+
+    with open(secrets_path, "w", encoding="utf-8") as f:
+        for k, v in existing.items():
+            f.write(f'{k} = "{v}"\n')
+
+
+def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[bool, str]:
+    """Tests the API connection with a lightweight prompt."""
+    cleaned = clean_api_key(api_key)
+    if not cleaned:
+        return False, "API key is empty."
+
+    config = PROVIDERS.get(provider)
+    if not config:
+        return False, f"Unknown provider {provider}."
+
+    # Format verification
+    if provider == "Groq" and not cleaned.startswith("gsk_"):
+        return False, "Groq API keys must start with 'gsk_'. Please copy the key from https://console.groq.com/keys"
+
+    headers = {
+        "Authorization": f"Bearer {cleaned}",
+        "Content-Type": "application/json"
+    }
+    if provider == "OpenRouter":
+        headers["HTTP-Referer"] = "https://kdp-architect.local"
+        headers["X-Title"] = "KDP E-Book Architect Pro"
+
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": "Reply with 'OK'."}],
+        "max_tokens": 10
+    }
+
+    try:
+        r = requests.post(config["endpoint"], headers=headers, json=payload, timeout=20)
+        if r.status_code == 200:
+            return True, f"Connection verified! Model '{model_name}' is ready."
+
+        err_detail = f"HTTP {r.status_code}"
+        try:
+            j = r.json()
+            if "error" in j:
+                detail = j["error"].get("message", r.text)
+                err_detail = f"{err_detail}: {detail}"
+            else:
+                err_detail = f"{err_detail}: {r.text[:150]}"
+        except Exception:
+            err_detail = f"{err_detail}: {r.text[:150]}"
+
+        if r.status_code == 401:
+            err_detail += " (Invalid API key. Check key in your provider console)."
+        elif r.status_code == 429:
+            err_detail += " (Rate limit exceeded. Try 'llama-3.1-8b-instant' or wait 1 minute)."
+
+        return False, err_detail
+    except Exception as e:
+        return False, f"Network error: {str(e)}"
+
+
+# ==============================================================================
 # Helper Functions: LLM, Text & File Sanitization
 # ==============================================================================
-def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, temperature: float = 0.7) -> str:
+def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
     """Sends a chat completion request to the chosen LLM provider."""
-    if not api_key or not api_key.strip():
-        raise ValueError("API Key is missing. Please provide your API key in the sidebar.")
+    cleaned_key = clean_api_key(api_key)
+    if not cleaned_key:
+        raise ValueError("API Key is missing. Please enter and save your API key in the sidebar.")
 
     config = PROVIDERS.get(provider)
     if not config:
         raise ValueError(f"Unknown provider '{provider}'.")
 
+    if provider == "Groq" and not cleaned_key.startswith("gsk_"):
+        raise ValueError("Groq API key is invalid (must start with 'gsk_'). Please verify your key at https://console.groq.com/keys")
+
     headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
+        "Authorization": f"Bearer {cleaned_key}",
         "Content-Type": "application/json"
     }
 
@@ -181,7 +323,7 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
         headers["X-Title"] = "KDP E-Book Architect Pro"
 
     payload = {
-        "model": config["model"],
+        "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -192,7 +334,7 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
     try:
         response = requests.post(config["endpoint"], headers=headers, json=payload, timeout=180)
     except requests.exceptions.Timeout:
-        raise RuntimeError("Request timed out. Please try again.")
+        raise RuntimeError("Request timed out after 180s. Please try again.")
     except requests.exceptions.ConnectionError:
         raise RuntimeError("Network connection error. Check your internet connection.")
     except requests.exceptions.RequestException as e:
@@ -206,14 +348,14 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
                 detail = err_json["error"].get("message", response.text)
                 error_msg += f": {detail}"
             else:
-                error_msg += f": {response.text}"
+                error_msg += f": {response.text[:200]}"
         except Exception:
-            error_msg += f": {response.text}"
+            error_msg += f": {response.text[:200]}"
 
         if response.status_code == 401:
-            error_msg += " (Check your API key)."
+            error_msg += " (Invalid API key. Check key on your provider console)."
         elif response.status_code == 429:
-            error_msg += " (Rate limit exceeded. Wait 30 seconds or switch provider)."
+            error_msg += " (Rate limit or TPM limit hit. Switch to 'llama-3.1-8b-instant' or Google Gemini)."
 
         raise RuntimeError(error_msg)
 
@@ -329,9 +471,8 @@ def generate_amazon_cover(
     title_y_start = 580
     line_spacing = 130
 
-    for idx, line in enumerate(title_lines[:5]):  # Up to 5 lines
+    for idx, line in enumerate(title_lines[:5]):
         y_pos = title_y_start + (idx * line_spacing)
-        # Drop shadow for depth
         draw.text((WIDTH // 2 + 4, y_pos + 4), line, fill=(0, 0, 0), font=title_font, anchor="mm")
         draw.text((WIDTH // 2, y_pos), line, fill=theme["title_color"], font=title_font, anchor="mm")
 
@@ -353,43 +494,97 @@ def generate_amazon_cover(
     draw.text((WIDTH // 2 + 2, author_y + 72), author.upper(), fill=(0, 0, 0), font=author_font, anchor="mm")
     draw.text((WIDTH // 2, author_y + 70), author.upper(), fill=theme["title_color"], font=author_font, anchor="mm")
 
-    # Convert to high-quality JPEG Bytes
     buffer = io.BytesIO()
     base.save(buffer, format="JPEG", quality=95)
     return buffer.getvalue()
 
 
 # ==============================================================================
-# Sidebar: API Configuration & Mobile Shortcuts
+# Sidebar: Persistent API Configuration & Diagnostics
 # ==============================================================================
 with st.sidebar:
     st.markdown("### ⚙️ API Configuration")
     provider_choice = st.selectbox("API Provider", options=list(PROVIDERS.keys()), index=0)
     selected_config = PROVIDERS[provider_choice]
 
+    # Model Selector for Selected Provider
+    active_model = st.selectbox(
+        "Active Model",
+        options=selected_config["models"],
+        index=0,
+        help="Choose model. If 70B hits rate limits on free tier, switch to 8B instant!"
+    )
+
+    # Check for automatically persisted key
+    initial_key = get_persisted_key(provider_choice)
+
     api_key_input = st.text_input(
         f"{provider_choice} API Key",
+        value=initial_key,
         type="password",
-        placeholder="Paste API key here...",
-        help="Free API key. Stored only in session memory."
+        placeholder="e.g. gsk_..." if provider_choice == "Groq" else "Paste API key here...",
+        help="Paste your API key here. Click '💾 Save Key' below to make it permanent across refreshes!"
     )
+
+    # Real-time prefix validation for Groq
+    cleaned_input = clean_api_key(api_key_input)
+    if provider_choice == "Groq" and cleaned_input and not cleaned_input.startswith("gsk_"):
+        st.warning("⚠️ Groq keys must start with `gsk_`. You may have copied the wrong text.")
+
+    if initial_key and initial_key == cleaned_input:
+        st.markdown('<div class="key-saved-badge">✓ API Key Saved in Storage</div>', unsafe_allow_html=True)
+
+    col_save, col_test = st.columns(2)
+    with col_save:
+        if st.button("💾 Save Key", use_container_width=True, help="Saves key locally so refresh won't erase it"):
+            if cleaned_input:
+                save_key_locally(provider_choice, cleaned_input)
+                st.session_state[f"key_{provider_choice}"] = cleaned_input
+                st.success("Key saved!")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("Enter key first!")
+
+    with col_test:
+        if st.button("🧪 Test Key", use_container_width=True, help="Test live connection to verify key works"):
+            if not cleaned_input:
+                st.error("Please enter a key first!")
+            else:
+                with st.spinner("Testing API connection..."):
+                    ok, msg = test_llm_connection(provider_choice, cleaned_input, active_model)
+                    if ok:
+                        st.success(f"✅ {msg}")
+                    else:
+                        st.error(f"❌ {msg}")
 
     st.markdown(
         f"""
         <div class="sidebar-note">
-            <strong>Active Model:</strong> <code>{selected_config['model']}</code><br>
+            <strong>Active Model:</strong> <code>{active_model}</code><br>
             <span style="font-size: 0.8rem; color: #475569;">{selected_config['description']}</span>
         </div>
         """,
         unsafe_allow_html=True
     )
 
+    with st.expander("🔒 How to Save Keys Permanently on Streamlit Cloud", expanded=False):
+        st.markdown(f"""
+1. On your deployed app URL, click **Settings** (top-right or bottom-right).
+2. Go to **Secrets**.
+3. Paste:
+```toml
+{selected_config['secret_name']} = "your_key_here"
+```
+4. Click **Save**. The app will now **NEVER forget your key**, even on phone!
+""")
+
     st.markdown("---")
     st.markdown("#### 🔑 Free API Key Links")
     st.markdown(
         f"""
-        - **[Google AI Studio]({PROVIDERS['Google Gemini']['key_url']})**
-        - **[Groq Cloud Console]({PROVIDERS['Groq']['key_url']})**
+        - **[Groq Cloud Console]({PROVIDERS['Groq']['key_url']})** (Get key starting with `gsk_`)
+        - **[Google AI Studio]({PROVIDERS['Google Gemini']['key_url']})** (Generous free limits)
         - **[OpenRouter]({PROVIDERS['OpenRouter']['key_url']})**
         """
     )
@@ -439,8 +634,9 @@ with tab_studio:
             hunt_btn = st.button("🔎 Scan & Hunt Winning Niches", use_container_width=True)
 
         if hunt_btn:
-            if not api_key_input:
-                st.error("⚠️ Please enter your API Key in the sidebar first.")
+            eff_key = clean_api_key(api_key_input)
+            if not eff_key:
+                st.error("⚠️ Please enter and save your API Key in the sidebar first.")
             else:
                 with st.spinner("Analyzing Amazon buyer search intent, competition levels, and profitability..."):
                     niche_sys_prompt = (
@@ -459,7 +655,7 @@ Provide exactly 3 Golden Micro-Niche Opportunities. For each:
 5. Recommended Hook for Amazon KDP
 """
                     try:
-                        suggestions = call_llm(niche_sys_prompt, niche_user_prompt, provider_choice, api_key_input)
+                        suggestions = call_llm(niche_sys_prompt, niche_user_prompt, provider_choice, eff_key, active_model)
                         st.session_state.niche_suggestions = suggestions
                         st.success("✅ Golden Micro-Niches Discovered!")
                     except Exception as e:
@@ -504,7 +700,8 @@ Provide exactly 3 Golden Micro-Niche Opportunities. For each:
     # Pipeline Execution
     # --------------------------------------------------------------------------
     if start_generation_btn:
-        if not api_key_input or not api_key_input.strip():
+        eff_key = clean_api_key(api_key_input)
+        if not eff_key:
             st.error("⚠️ **API Key Required:** Please enter your API Key in the sidebar.")
             st.stop()
 
@@ -524,7 +721,7 @@ Provide exactly 3 Golden Micro-Niche Opportunities. For each:
         p4_box = st.empty()
         cover_box = st.empty()
 
-        total_steps = 2 + chapters_count + 2  # P1, P2, N Chapters, P4, Cover
+        total_steps = 2 + chapters_count + 2
         current_step = 0
 
         def update_ui(step_idx: int, msg: str):
@@ -542,7 +739,7 @@ Provide exactly 3 Golden Micro-Niche Opportunities. For each:
                 "combinations based on the topic. Include target reader pain points and commercial rationale."
             )
             p1_user = f"Topic: {topic_input.strip()}\nAudience: {audience_input.strip() if audience_input else 'General non-fiction buyers'}"
-            phase1_output = call_llm(p1_sys, p1_user, provider_choice, api_key_input)
+            phase1_output = call_llm(p1_sys, p1_user, provider_choice, eff_key, active_model)
 
             with p1_box.expander("📊 Phase 1: Market Research & Titles", expanded=True):
                 st.markdown(phase1_output)
@@ -558,7 +755,7 @@ Provide exactly 3 Golden Micro-Niche Opportunities. For each:
                 f"chapters based on Phase 1. Each chapter must have a compelling title and 3 distinct sub-points."
             )
             p2_user = f"Topic: {topic_input.strip()}\nTarget Chapters: {chapters_count}\nMarket Research Context:\n{phase1_output}"
-            phase2_output = call_llm(p2_sys, p2_user, provider_choice, api_key_input)
+            phase2_output = call_llm(p2_sys, p2_user, provider_choice, eff_key, active_model)
 
             with p2_box.expander("🏗️ Phase 2: Chapter Outline Architecture", expanded=True):
                 st.markdown(phase2_output)
@@ -586,7 +783,7 @@ INSTRUCTION:
 Write ONLY Chapter {ch} in deep, comprehensive detail (around 1000-1400 words).
 Cover all 3 sub-points thoroughly. Deliver publication-ready manuscript content with H2, H3 headers.
 """
-                ch_text = call_llm(p3_sys, p3_user, provider_choice, api_key_input, temperature=0.7)
+                ch_text = call_llm(p3_sys, p3_user, provider_choice, eff_key, active_model, temperature=0.7)
                 chapters_list.append({"chapter_num": ch, "content": ch_text})
 
                 with p3_box.expander(f"📖 Chapter {ch} Manuscript Draft", expanded=False):
@@ -604,7 +801,7 @@ Cover all 3 sub-points thoroughly. Deliver publication-ready manuscript content 
                 "and an HTML formatted Amazon Book Description."
             )
             p4_user = f"Topic: {topic_input.strip()}\nOutline:\n{phase2_output}"
-            phase4_output = call_llm(p4_sys, p4_user, provider_choice, api_key_input)
+            phase4_output = call_llm(p4_sys, p4_user, provider_choice, eff_key, active_model)
 
             with p4_box.expander("🚀 Phase 4: Amazon KDP SEO Package", expanded=True):
                 st.markdown(phase4_output)
@@ -615,7 +812,6 @@ Cover all 3 sub-points thoroughly. Deliver publication-ready manuscript content 
             current_step += 1
             update_ui(current_step, "Phase 5: Rendering 300-DPI Amazon Cover (1600x2560 px)...")
 
-            # Extract a clean title for cover
             cover_title = topic_input.strip()
             cover_subtitle = audience_input.strip() if audience_input else "A Practical Step-by-Step Blueprint"
 
@@ -626,7 +822,7 @@ Cover all 3 sub-points thoroughly. Deliver publication-ready manuscript content 
                 theme_name=theme_choice
             )
 
-            # Build Full Manuscript with Front Matter & Back Matter (Legal, Introduction, Review Nudge)
+            # Build Full Manuscript with Front Matter & Back Matter
             front_matter = f"""# {topic_input.strip()}
 ### {cover_subtitle}
 **By {author_input.strip()}**
@@ -636,12 +832,12 @@ Cover all 3 sub-points thoroughly. Deliver publication-ready manuscript content 
 ### Copyright & Disclaimer
 © {time.strftime('%Y')} {author_input.strip()}. All rights reserved.
 No part of this publication may be reproduced, distributed, or transmitted in any form without prior written permission.
-*Disclaimer: This book is prepared for educational and informational purposes only. Readers are advised to seek professional advice when applicable.*
+*Disclaimer: This book is prepared for educational and informational purposes only.*
 
 ---
 
 ### Introduction: The Transformation Awaiting You
-Welcome to {topic_input.strip()}. If you have ever felt overwhelmed or sought a practical, no-nonsense path forward, this guide is crafted specifically for you. Read each chapter with action in mind.
+Welcome to {topic_input.strip()}. If you have ever sought a practical, no-nonsense path forward, this guide is crafted specifically for you. Read each chapter with action in mind.
 
 ---
 """
@@ -655,7 +851,7 @@ Welcome to {topic_input.strip()}. If you have ever felt overwhelmed or sought a 
 Thank you for investing your time into reading **{topic_input.strip()}**!
 
 ### How You Can Help Fellow Readers:
-If you found even one insight, strategy, or idea valuable from this book, **could you please leave an honest 1-minute review on Amazon?**
+If you found value from this book, **could you please leave an honest 1-minute review on Amazon?**
 Independent authors depend on genuine reader feedback, and your review helps other passionate learners discover this book!
 
 ### Claim Your Free Bonus Cheatsheet:
@@ -677,7 +873,7 @@ Generated by: KDP E-Book Architect Pro
 Title: {topic_input.strip()}
 Subtitle: {cover_subtitle}
 
-[2] 7 BACKEND SEARCH KEYWORDS (Copy & paste each into KDP keyword boxes 1-7):
+[2] 7 BACKEND SEARCH KEYWORDS:
 (Extracted from SEO package below)
 
 [3] AMAZON KDP FULL SEO PACKAGE & DESCRIPTION:
@@ -692,13 +888,13 @@ INSTRUCTIONS:
 ================================================================================
 """
 
-            # Store in Session State
             slug = sanitize_filename(topic_input.strip())
             st.session_state.book_data = {
                 "topic": topic_input.strip(),
                 "author": author_input.strip(),
                 "chapters_count": chapters_count,
                 "provider": provider_choice,
+                "model": active_model,
                 "phase1": phase1_output,
                 "phase2": phase2_output,
                 "chapters": chapters_list,
@@ -717,7 +913,7 @@ INSTRUCTIONS:
         except Exception as e:
             status_box.empty()
             st.error(f"❌ **Generation Error:** {str(e)}")
-            st.warning("💡 Tip: Check your API key, ensure rate limits are respected, or switch to Google Gemini.")
+            st.warning("💡 Tip: If you hit a rate limit with Llama 3.3 70B, select 'llama-3.1-8b-instant' in the sidebar dropdown or switch to Google Gemini.")
 
     # --------------------------------------------------------------------------
     # Results, Downloads & Cover Studio Display
@@ -746,15 +942,14 @@ INSTRUCTIONS:
                     <div class="metric-label">Cover Resolution</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">Ready</div>
-                    <div class="metric-label">KDP Launch Kit</div>
+                    <div class="metric-value">{data.get('model', data['provider'])}</div>
+                    <div class="metric-label">Active Model</div>
                 </div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # 3 Main Downloads (Manuscript, Cover, KDP Sheet)
         col_d1, col_d2, col_d3 = st.columns(3)
         with col_d1:
             st.download_button(
@@ -783,11 +978,9 @@ INSTRUCTIONS:
                 use_container_width=True
             )
 
-        # Visual Book Cover Display
         st.markdown("### 🎨 Generated Amazon Book Cover (300 DPI, 1:1.6 Ratio)")
         st.image(data["cover_bytes"], caption=f"Amazon-Ready Cover: {data['cover_filename']}", width=340)
 
-        # Reset Option
         if st.button("🔄 Clear & Create Another Book", use_container_width=False):
             st.session_state.book_data = None
             st.rerun()
@@ -808,7 +1001,7 @@ Follow this exact blueprint to publish your book and start generating passive in
 1. Go to **[kdp.amazon.com](https://kdp.amazon.com)** and sign in with your normal Amazon account.
 2. Complete your **Account Information**:
    - **Bank Account Details**: Where Amazon will deposit your royalties directly every month.
-   - **Tax Interview**: A 2-minute online questionnaire (for non-US residents, enter your country's tax ID to enjoy the lowest tax treaty rates).
+   - **Tax Interview**: A 2-minute online questionnaire.
 
 ---
 
