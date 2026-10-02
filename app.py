@@ -97,14 +97,14 @@ st.markdown("""
 # ==============================================================================
 PROVIDERS = {
     "Groq": {
-        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-        "default_model": "llama-3.3-70b-versatile",
+        "models": ["llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
+        "default_model": "llama-3.1-8b-instant",
         "endpoint": "https://api.groq.com/openai/v1/chat/completions",
         "key_url": "https://console.groq.com/keys",
         "key_label": "Groq Cloud Console",
         "key_prefix": "gsk_",
         "secret_name": "GROQ_API_KEY",
-        "description": "Ultra-fast inference on Groq LPUs. Supports Llama 3.3 70B & high-limit 8B."
+        "description": "Ultra-fast inference on Groq LPUs. Dynamically queries active models on your account."
     },
     "Google Gemini": {
         "models": ["gemini-1.5-flash", "gemini-2.0-flash"],
@@ -272,6 +272,32 @@ def save_key_locally(provider: str, key_val: str):
         pass
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_live_groq_models(api_key: str) -> list[str]:
+    """Dynamically fetches currently active models from Groq API for this account."""
+    cleaned = clean_api_key(api_key)
+    if not cleaned or not cleaned.startswith("gsk_"):
+        return []
+    try:
+        r = requests.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {cleaned}"},
+            timeout=8
+        )
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            text_models = [
+                m["id"] for m in data
+                if "whisper" not in m.get("id", "").lower()
+                and "embed" not in m.get("id", "").lower()
+            ]
+            if text_models:
+                return sorted(text_models)
+    except Exception:
+        pass
+    return []
+
+
 def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[bool, str]:
     """Tests the API connection with a lightweight prompt."""
     cleaned = clean_api_key(api_key)
@@ -316,10 +342,16 @@ def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[b
         except Exception:
             err_detail = f"{err_detail}: {r.text[:150]}"
 
-        if r.status_code == 401:
+        if r.status_code == 404 and provider == "Groq":
+            live = fetch_live_groq_models(cleaned)
+            if live:
+                err_detail += f" (Model '{model_name}' is retired. Select an active model from the dropdown: {', '.join(live[:3])})."
+            else:
+                err_detail += f" (Model '{model_name}' does not exist on Groq. Please choose another model from the dropdown)."
+        elif r.status_code == 401:
             err_detail += " (Invalid API key. Check key in your provider console)."
         elif r.status_code == 429:
-            err_detail += " (Rate limit exceeded. Try 'llama-3.1-8b-instant' or wait 1 minute)."
+            err_detail += " (Rate limit exceeded. Switch model or wait 1 minute)."
 
         return False, err_detail
     except Exception as e:
@@ -370,10 +402,17 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
         raise RuntimeError(f"Network error: {str(e)}")
 
     if response.status_code != 200:
-        # Automatic fallback for Groq free-tier TPM rate limit:
-        if response.status_code == 429 and provider == "Groq" and model_name != "llama-3.1-8b-instant":
-            time.sleep(2)
-            payload["model"] = "llama-3.1-8b-instant"
+        # Automatic recovery for Groq: if model is retired (404) or rate-limited (429)
+        if provider == "Groq" and response.status_code in (404, 429):
+            time.sleep(1)
+            live = fetch_live_groq_models(cleaned_key)
+            fallback_model = "llama-3.1-8b-instant"
+            if live:
+                for candidate in live:
+                    if candidate != model_name:
+                        fallback_model = candidate
+                        break
+            payload["model"] = fallback_model
             fallback_resp = requests.post(config["endpoint"], headers=headers, json=payload, timeout=180)
             if fallback_resp.status_code == 200:
                 res_data = fallback_resp.json()
@@ -390,10 +429,12 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
         except Exception:
             error_msg += f": {response.text[:200]}"
 
-        if response.status_code == 401:
+        if response.status_code == 404 and provider == "Groq":
+            error_msg += " (Model was retired by Groq. Please select an active model from the sidebar dropdown)."
+        elif response.status_code == 401:
             error_msg += " (Invalid API key. Check key on your provider console)."
         elif response.status_code == 429:
-            error_msg += " (Rate limit or TPM limit hit. Switch to 'llama-3.1-8b-instant' in sidebar or Google Gemini)."
+            error_msg += " (Rate limit or TPM limit hit. Switch to an instant model or Google Gemini)."
 
         raise RuntimeError(error_msg)
 
@@ -545,14 +586,6 @@ with st.sidebar:
     provider_choice = st.selectbox("API Provider", options=list(PROVIDERS.keys()), index=0)
     selected_config = PROVIDERS[provider_choice]
 
-    # Model Selector for Selected Provider
-    active_model = st.selectbox(
-        "Active Model",
-        options=selected_config["models"],
-        index=0,
-        help="Choose model. If 70B hits rate limits on free tier, switch to 8B instant!"
-    )
-
     # Check for automatically persisted key
     initial_key = get_persisted_key(provider_choice)
 
@@ -564,10 +597,26 @@ with st.sidebar:
         help="Paste your API key here. Click '💾 Save Key' below to make it permanent across refreshes!"
     )
 
+    cleaned_input = clean_api_key(api_key_input) or clean_api_key(initial_key)
+
     # Real-time prefix validation for Groq
-    cleaned_input = clean_api_key(api_key_input)
     if provider_choice == "Groq" and cleaned_input and not cleaned_input.startswith("gsk_"):
         st.warning("⚠️ Groq keys must start with `gsk_`. You may have copied the wrong text.")
+
+    # Dynamically query active models from Groq using user's key
+    available_models = list(selected_config["models"])
+    if provider_choice == "Groq" and cleaned_input:
+        live_groq = fetch_live_groq_models(cleaned_input)
+        if live_groq:
+            available_models = live_groq
+
+    # Model Selector for Selected Provider
+    active_model = st.selectbox(
+        "Active Model",
+        options=available_models,
+        index=0,
+        help="Choose active model. Dynamically fetched from your provider."
+    )
 
     if initial_key and initial_key == cleaned_input:
         st.markdown('<div class="key-saved-badge">✓ API Key Saved in Storage</div>', unsafe_allow_html=True)
