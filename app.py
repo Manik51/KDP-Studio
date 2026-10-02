@@ -97,8 +97,8 @@ st.markdown("""
 # ==============================================================================
 PROVIDERS = {
     "Google Gemini": {
-        "models": ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"],
-        "default_model": "gemini-1.5-flash",
+        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"],
+        "default_model": "gemini-3.8-flash",
         "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_url": "https://aistudio.google.com/",
         "key_label": "Google AI Studio",
@@ -340,23 +340,28 @@ def parse_api_error(status_code: int, response_text: str) -> str:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_live_gemini_models(api_key: str) -> list[str]:
-    """Dynamically fetches models available for this user's Google AI Studio key."""
+    """Dynamically fetches active models available for this user's Google AI Studio key."""
     cleaned = clean_api_key(api_key)
     if not cleaned:
-        return ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"]
+        return ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
     try:
-        r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={cleaned}", timeout=8)
+        r = requests.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={cleaned}",
+            headers={"x-goog-api-key": cleaned},
+            timeout=8
+        )
         if r.status_code == 200:
             models_data = r.json().get("models", [])
             valid_models = []
+            deprecated_tokens = ["gemini-1.", "gemini-2.0", "pro-latest", "pro-vision", "1.0", "embed", "aqa", "imagen"]
             for m in models_data:
                 name = m.get("name", "").replace("models/", "")
                 methods = m.get("supportedGenerationMethods", [])
                 if "generateContent" in methods and "gemini" in name.lower():
-                    if not any(x in name.lower() for x in ["embed", "aqa", "imagen"]):
+                    if not any(t in name.lower() for t in deprecated_tokens):
                         valid_models.append(name)
             if valid_models:
-                preferred = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-lite"]
+                preferred = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
                 sorted_models = [p for p in preferred if p in valid_models]
                 for m in valid_models:
                     if m not in sorted_models and "pro" not in m:
@@ -364,23 +369,28 @@ def fetch_live_gemini_models(api_key: str) -> list[str]:
                 for m in valid_models:
                     if m not in sorted_models:
                         sorted_models.append(m)
-                return sorted_models
+                if sorted_models:
+                    return sorted_models
     except Exception:
         pass
-    return ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"]
+    return ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
 
 
 def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
-    """Bulletproof dual-endpoint Google Gemini caller with automatic model fallback."""
+    """Bulletproof dual-endpoint Google Gemini caller with automatic 2026 model fallback."""
     cleaned_key = clean_api_key(api_key)
     if not cleaned_key:
         raise ValueError("Google Gemini API Key is missing. Please enter your key in the sidebar.")
 
-    target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-1.5-flash"
+    target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-3.8-flash"
+
+    # If target_model is known deprecated/retired or has given 404, immediately swap to gemini-3.8-flash
+    if any(t in target_model.lower() for t in ["1.5", "2.0", "pro-latest", "pro-vision", "1.0"]):
+        target_model = "gemini-3.8-flash"
 
     # Build fallback candidates list (requested model first, then guaranteed working flash models)
     candidates = [target_model]
-    for fallback in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"]:
+    for fallback in ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]:
         if fallback not in candidates:
             candidates.append(fallback)
 
@@ -389,6 +399,10 @@ def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: 
     for current_model in candidates:
         # METHOD 1: Google Native REST API (Zero rate limits, 1 Million TPM free limit)
         native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent?key={cleaned_key}"
+        native_headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": cleaned_key
+        }
         native_payload = {
             "contents": [
                 {
@@ -405,7 +419,7 @@ def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: 
             }
 
         try:
-            r = requests.post(native_url, json=native_payload, timeout=180)
+            r = requests.post(native_url, headers=native_headers, json=native_payload, timeout=180)
             if r.status_code == 200:
                 res_data = r.json()
                 items = res_data.get("candidates", [])
@@ -418,7 +432,6 @@ def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: 
                     raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
                 last_error = parse_api_error(r.status_code, r.text)
             elif r.status_code in (404, 429, 500, 503):
-                # 404 means model not found/not supported for this key -> continue to next candidate!
                 last_error = parse_api_error(r.status_code, r.text)
                 continue
             else:
@@ -561,7 +574,7 @@ def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[b
     try:
         res = call_llm("You are a connection tester.", "Reply with 'OK'.", provider, api_key, model_name)
         if res:
-            return True, f"Connection verified! {provider} ('{model_name}') is 100% active and ready."
+            return True, f"Connection verified! {provider} is 100% active and ready."
         return False, "Received empty response from provider."
     except Exception as e:
         return False, str(e)
