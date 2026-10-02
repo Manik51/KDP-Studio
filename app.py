@@ -97,7 +97,7 @@ st.markdown("""
 # ==============================================================================
 PROVIDERS = {
     "Google Gemini": {
-        "models": ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+        "models": ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"],
         "default_model": "gemini-1.5-flash",
         "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_url": "https://aistudio.google.com/",
@@ -338,72 +338,128 @@ def parse_api_error(status_code: int, response_text: str) -> str:
     return msg
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_live_gemini_models(api_key: str) -> list[str]:
+    """Dynamically fetches models available for this user's Google AI Studio key."""
+    cleaned = clean_api_key(api_key)
+    if not cleaned:
+        return ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"]
+    try:
+        r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={cleaned}", timeout=8)
+        if r.status_code == 200:
+            models_data = r.json().get("models", [])
+            valid_models = []
+            for m in models_data:
+                name = m.get("name", "").replace("models/", "")
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" in methods and "gemini" in name.lower():
+                    if not any(x in name.lower() for x in ["embed", "aqa", "imagen"]):
+                        valid_models.append(name)
+            if valid_models:
+                preferred = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-lite"]
+                sorted_models = [p for p in preferred if p in valid_models]
+                for m in valid_models:
+                    if m not in sorted_models and "pro" not in m:
+                        sorted_models.append(m)
+                for m in valid_models:
+                    if m not in sorted_models:
+                        sorted_models.append(m)
+                return sorted_models
+    except Exception:
+        pass
+    return ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"]
+
+
 def call_gemini(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
-    """Bulletproof dual-endpoint Google Gemini caller (Native REST + OpenAI fallback)."""
+    """Bulletproof dual-endpoint Google Gemini caller with automatic model fallback."""
     cleaned_key = clean_api_key(api_key)
     if not cleaned_key:
         raise ValueError("Google Gemini API Key is missing. Please enter your key in the sidebar.")
 
     target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-1.5-flash"
 
-    # METHOD 1: Google Native REST API (The most reliable, zero rate-limit issues, 1 Million TPM)
-    native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={cleaned_key}"
-    native_payload = {
-        "systemInstruction": {
-            "parts": [{"text": system_prompt}]
-        },
-        "contents": [
-            {
-                "parts": [{"text": user_prompt}]
+    # Build fallback candidates list (requested model first, then guaranteed working flash models)
+    candidates = [target_model]
+    for fallback in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"]:
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    last_error = ""
+
+    for current_model in candidates:
+        # METHOD 1: Google Native REST API (Zero rate limits, 1 Million TPM free limit)
+        native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent?key={cleaned_key}"
+        native_payload = {
+            "contents": [
+                {
+                    "parts": [{"text": user_prompt}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": temperature
             }
-        ],
-        "generationConfig": {
+        }
+        if system_prompt and system_prompt.strip():
+            native_payload["systemInstruction"] = {
+                "parts": [{"text": system_prompt.strip()}]
+            }
+
+        try:
+            r = requests.post(native_url, json=native_payload, timeout=180)
+            if r.status_code == 200:
+                res_data = r.json()
+                items = res_data.get("candidates", [])
+                if items:
+                    parts = items[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "").strip()
+            elif r.status_code == 400:
+                if "API key not valid" in r.text or "API_KEY_INVALID" in r.text:
+                    raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
+                last_error = parse_api_error(r.status_code, r.text)
+            elif r.status_code in (404, 429, 500, 503):
+                # 404 means model not found/not supported for this key -> continue to next candidate!
+                last_error = parse_api_error(r.status_code, r.text)
+                continue
+            else:
+                last_error = parse_api_error(r.status_code, r.text)
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+
+        # METHOD 2: Google OpenAI-compatible endpoint fallback for current_model
+        headers = {
+            "Authorization": f"Bearer {cleaned_key}",
+            "Content-Type": "application/json"
+        }
+        messages = []
+        if system_prompt and system_prompt.strip():
+            messages.append({"role": "system", "content": system_prompt.strip()})
+        messages.append({"role": "user", "content": user_prompt})
+
+        payload = {
+            "model": current_model,
+            "messages": messages,
             "temperature": temperature
         }
-    }
+        try:
+            r2 = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=180
+            )
+            if r2.status_code == 200:
+                data = r2.json()
+                return data["choices"][0]["message"]["content"].strip()
+            elif r2.status_code in (404, 429, 500, 503):
+                last_error = parse_api_error(r2.status_code, r2.text)
+                continue
+            else:
+                last_error = parse_api_error(r2.status_code, r2.text)
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
 
-    try:
-        r = requests.post(native_url, json=native_payload, timeout=180)
-        if r.status_code == 200:
-            res_data = r.json()
-            candidates = res_data.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
-                    return parts[0].get("text", "").strip()
-        elif r.status_code == 400 and "API key not valid" in r.text:
-            raise RuntimeError("Invalid Gemini API Key! Please copy your free key from https://aistudio.google.com/")
-    except requests.exceptions.RequestException:
-        pass
-
-    # METHOD 2: Google OpenAI-compatible endpoint fallback
-    headers = {
-        "Authorization": f"Bearer {cleaned_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": target_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": temperature
-    }
-    try:
-        r2 = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=180
-        )
-        if r2.status_code == 200:
-            data = r2.json()
-            return data["choices"][0]["message"]["content"].strip()
-        else:
-            err = parse_api_error(r2.status_code, r2.text)
-            raise RuntimeError(f"Google Gemini Error: {err}")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Network error connecting to Google Gemini: {str(e)}")
+    raise RuntimeError(f"Google Gemini Error: {last_error or 'All Gemini model candidates failed. Please verify your API key at https://aistudio.google.com/'}")
 
 
 def call_openrouter(system_prompt: str, user_prompt: str, api_key: str, model_name: str, temperature: float = 0.7) -> str:
@@ -666,9 +722,13 @@ with st.sidebar:
     if provider_choice == "Groq" and cleaned_input and not cleaned_input.startswith("gsk_"):
         st.warning("⚠️ Groq keys must start with `gsk_`. You may have copied the wrong text.")
 
-    # Dynamically query active models from Groq or OpenRouter
+    # Dynamically query active models from Google Gemini, Groq, or OpenRouter
     available_models = list(selected_config["models"])
-    if provider_choice == "Groq" and cleaned_input:
+    if provider_choice == "Google Gemini" and cleaned_input:
+        live_gemini = fetch_live_gemini_models(cleaned_input)
+        if live_gemini:
+            available_models = live_gemini
+    elif provider_choice == "Groq" and cleaned_input:
         live_groq = fetch_live_groq_models(cleaned_input)
         if live_groq:
             available_models = live_groq
