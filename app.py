@@ -186,61 +186,90 @@ def clean_api_key(raw_key: str) -> str:
 
 
 def get_persisted_key(provider: str) -> str:
-    """Retrieves key from st.secrets, local secrets.toml, or session state."""
+    """Retrieves key from secrets, session state, browser query params, or local storage."""
     config = PROVIDERS.get(provider, {})
     env_var = config.get("secret_name", "")
+    param_name = f"{provider.lower().replace(' ', '_')}_key"
 
-    # 1. Check Streamlit Secrets (for Streamlit Cloud deployments)
+    # 1. Check Streamlit Secrets (App Settings > Secrets on Streamlit Cloud)
     try:
-        if env_var in st.secrets:
+        if env_var and env_var in st.secrets:
             val = str(st.secrets[env_var]).strip()
             if val:
                 return val
     except Exception:
         pass
 
-    # 2. Check local .streamlit/secrets.toml
-    secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
-    if os.path.exists(secrets_path):
-        try:
+    # 2. Check Session State
+    session_val = st.session_state.get(f"key_{provider}", "")
+    if session_val:
+        return session_val
+
+    # 3. Check Browser Query Params (URL persistence across page refresh)
+    try:
+        if param_name in st.query_params:
+            q_val = str(st.query_params[param_name]).strip()
+            if q_val:
+                return q_val
+    except Exception:
+        pass
+
+    # 4. Check local .streamlit/secrets.toml if running on a writable local filesystem
+    try:
+        secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+        if os.path.exists(secrets_path):
             with open(secrets_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 match = re.search(rf'{env_var}\s*=\s*["\']([^"\']+)["\']', content)
                 if match:
                     return match.group(1).strip()
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-    # 3. Check Session State
-    return st.session_state.get(f"key_{provider}", "")
+    return ""
 
 
 def save_key_locally(provider: str, key_val: str):
-    """Saves API key to .streamlit/secrets.toml so it persists across page refreshes."""
-    config = PROVIDERS.get(provider, {})
-    env_var = config.get("secret_name", "")
-    if not env_var or not key_val:
+    """Saves API key safely in session, query_params, and local disk without crashing on read-only cloud mounts."""
+    cleaned = clean_api_key(key_val)
+    if not cleaned:
         return
 
-    os.makedirs(os.path.join(os.getcwd(), ".streamlit"), exist_ok=True)
-    secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+    # Always save to Session State & Browser URL Query Params (Works 100% on Cloud & Mobile)
+    st.session_state[f"key_{provider}"] = cleaned
+    param_name = f"{provider.lower().replace(' ', '_')}_key"
+    try:
+        st.query_params[param_name] = cleaned
+    except Exception:
+        pass
 
-    existing = {}
-    if os.path.exists(secrets_path):
-        try:
+    # Try saving to local disk file IF filesystem allows it (silently pass on read-only cloud filesystems)
+    try:
+        config = PROVIDERS.get(provider, {})
+        env_var = config.get("secret_name", "")
+        if not env_var:
+            return
+
+        streamlit_dir = os.path.join(os.getcwd(), ".streamlit")
+        os.makedirs(streamlit_dir, exist_ok=True)
+        secrets_path = os.path.join(streamlit_dir, "secrets.toml")
+
+        existing = {}
+        if os.path.exists(secrets_path):
             with open(secrets_path, "r", encoding="utf-8") as f:
                 for line in f:
                     m = re.match(r'([A-Za-z0-9_]+)\s*=\s*["\']([^"\']+)["\']', line.strip())
                     if m:
                         existing[m.group(1)] = m.group(2)
-        except Exception:
-            pass
 
-    existing[env_var] = key_val
+        existing[env_var] = cleaned
 
-    with open(secrets_path, "w", encoding="utf-8") as f:
-        for k, v in existing.items():
-            f.write(f'{k} = "{v}"\n')
+        with open(secrets_path, "w", encoding="utf-8") as f:
+            for k, v in existing.items():
+                f.write(f'{k} = "{v}"\n')
+    except (OSError, PermissionError, Exception):
+        # Streamlit Cloud uses a read-only repository mount; in-memory & query_params handle persistence cleanly
+        pass
 
 
 def test_llm_connection(provider: str, api_key: str, model_name: str) -> tuple[bool, str]:
@@ -341,6 +370,15 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
         raise RuntimeError(f"Network error: {str(e)}")
 
     if response.status_code != 200:
+        # Automatic fallback for Groq free-tier TPM rate limit:
+        if response.status_code == 429 and provider == "Groq" and model_name != "llama-3.1-8b-instant":
+            time.sleep(2)
+            payload["model"] = "llama-3.1-8b-instant"
+            fallback_resp = requests.post(config["endpoint"], headers=headers, json=payload, timeout=180)
+            if fallback_resp.status_code == 200:
+                res_data = fallback_resp.json()
+                return res_data["choices"][0]["message"]["content"].strip()
+
         error_msg = f"HTTP Error {response.status_code}"
         try:
             err_json = response.json()
@@ -355,7 +393,7 @@ def call_llm(system_prompt: str, user_prompt: str, provider: str, api_key: str, 
         if response.status_code == 401:
             error_msg += " (Invalid API key. Check key on your provider console)."
         elif response.status_code == 429:
-            error_msg += " (Rate limit or TPM limit hit. Switch to 'llama-3.1-8b-instant' or Google Gemini)."
+            error_msg += " (Rate limit or TPM limit hit. Switch to 'llama-3.1-8b-instant' in sidebar or Google Gemini)."
 
         raise RuntimeError(error_msg)
 
@@ -536,23 +574,22 @@ with st.sidebar:
 
     col_save, col_test = st.columns(2)
     with col_save:
-        if st.button("💾 Save Key", use_container_width=True, help="Saves key locally so refresh won't erase it"):
+        if st.button("💾 Save Key", use_container_width=True, help="Saves key so refresh won't erase it"):
             if cleaned_input:
                 save_key_locally(provider_choice, cleaned_input)
                 st.session_state[f"key_{provider_choice}"] = cleaned_input
-                st.success("Key saved!")
-                time.sleep(0.5)
-                st.rerun()
+                st.success("✅ Key saved in session & URL! It will not be erased on refresh.")
             else:
                 st.error("Enter key first!")
 
     with col_test:
         if st.button("🧪 Test Key", use_container_width=True, help="Test live connection to verify key works"):
-            if not cleaned_input:
+            target_key = cleaned_input or get_persisted_key(provider_choice)
+            if not target_key:
                 st.error("Please enter a key first!")
             else:
                 with st.spinner("Testing API connection..."):
-                    ok, msg = test_llm_connection(provider_choice, cleaned_input, active_model)
+                    ok, msg = test_llm_connection(provider_choice, target_key, active_model)
                     if ok:
                         st.success(f"✅ {msg}")
                     else:
@@ -634,7 +671,7 @@ with tab_studio:
             hunt_btn = st.button("🔎 Scan & Hunt Winning Niches", use_container_width=True)
 
         if hunt_btn:
-            eff_key = clean_api_key(api_key_input)
+            eff_key = clean_api_key(api_key_input) or clean_api_key(get_persisted_key(provider_choice))
             if not eff_key:
                 st.error("⚠️ Please enter and save your API Key in the sidebar first.")
             else:
@@ -700,7 +737,7 @@ Provide exactly 3 Golden Micro-Niche Opportunities. For each:
     # Pipeline Execution
     # --------------------------------------------------------------------------
     if start_generation_btn:
-        eff_key = clean_api_key(api_key_input)
+        eff_key = clean_api_key(api_key_input) or clean_api_key(get_persisted_key(provider_choice))
         if not eff_key:
             st.error("⚠️ **API Key Required:** Please enter your API Key in the sidebar.")
             st.stop()
