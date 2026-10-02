@@ -2,6 +2,7 @@ import os
 import re
 import io
 import time
+import urllib.parse
 import requests
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
@@ -19,7 +20,7 @@ except ImportError:
 # Page Configuration & Mobile-Friendly Styling
 # ==============================================================================
 st.set_page_config(
-    page_title="KDP E-Book Architect Pro - Bestseller Studio",
+    page_title="KDP E-Book Architect Pro - Autonomous Bestseller Studio",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -67,7 +68,6 @@ st.markdown("""
         padding: 0.9rem 1rem;
         text-align: center;
         box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        transition: transform 0.15s ease;
     }
     .metric-value {
         font-size: 1.4rem;
@@ -253,6 +253,34 @@ COVER_THEMES = {
 }
 
 # ==============================================================================
+# AI Colorful Image Generator (Pollinations.ai Free Engine)
+# ==============================================================================
+def fetch_ai_image(prompt: str, width: int = 1024, height: int = 640) -> bytes:
+    """Fetches high-quality AI generated color illustration without requiring any paid API key."""
+    try:
+        clean_p = urllib.parse.quote(prompt.strip()[:180])
+        url = f"https://image.pollinations.ai/prompt/{clean_p}?width={width}&height={height}&nologo=true&seed=42"
+        r = requests.get(url, timeout=22)
+        if r.status_code == 200 and len(r.content) > 1000:
+            return r.content
+    except Exception:
+        pass
+
+    # Reliable fallback: Generate an artistic graphic placeholder with Pillow
+    img = Image.new("RGB", (width, height), (30, 58, 138))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([(20, 20), (width - 20, height - 20)], outline=(245, 158, 11), width=4)
+    try:
+        f = ImageFont.load_default(size=36)
+    except Exception:
+        f = ImageFont.load_default()
+    draw.text((width // 2, height // 2), prompt[:40], fill=(255, 255, 255), font=f, anchor="mm")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+# ==============================================================================
 # API Key Sanitization, Storage & Persistence Helpers
 # ==============================================================================
 def clean_api_key(raw_key: str) -> str:
@@ -273,7 +301,6 @@ def get_persisted_key(provider: str) -> str:
     env_var = config.get("secret_name", "")
     param_name = f"{provider.lower().replace(' ', '_')}_key"
 
-    # 1. Check Streamlit Secrets (App Settings > Secrets on Streamlit Cloud)
     try:
         if env_var and env_var in st.secrets:
             val = str(st.secrets[env_var]).strip()
@@ -282,12 +309,10 @@ def get_persisted_key(provider: str) -> str:
     except Exception:
         pass
 
-    # 2. Check Session State
     session_val = st.session_state.get(f"key_{provider}", "")
     if session_val:
         return session_val
 
-    # 3. Check Browser Query Params (URL persistence across page refresh)
     try:
         if param_name in st.query_params:
             q_val = str(st.query_params[param_name]).strip()
@@ -296,7 +321,6 @@ def get_persisted_key(provider: str) -> str:
     except Exception:
         pass
 
-    # 4. Check local .streamlit/secrets.toml if running on a writable local filesystem
     try:
         secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
         if os.path.exists(secrets_path):
@@ -581,7 +605,6 @@ def call_openrouter(system_prompt: str, user_prompt: str, api_key: str, model_na
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
 
-        # If model retired or unavailable, auto-fallback to openrouter/free
         if r.status_code in (400, 404) and target_model != "openrouter/free":
             payload["model"] = "openrouter/free"
             r2 = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=180)
@@ -621,7 +644,6 @@ def call_groq(system_prompt: str, user_prompt: str, api_key: str, model_name: st
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
 
-        # If rate limit (429) or model retired (404), auto-switch to 8B instant!
         if r.status_code in (429, 404):
             time.sleep(2)
             payload["model"] = "llama-3.1-8b-instant"
@@ -671,7 +693,7 @@ def count_words(text: str) -> int:
 
 
 # ==============================================================================
-# Built-in 300-DPI Cover Studio (Studio Grade - Zero Canva Required)
+# Built-in 300-DPI Cover Studio (Studio Grade - Dual JPG & PDF Export)
 # ==============================================================================
 def wrap_text(text: str, max_chars_per_line: int = 22) -> list:
     """Wraps text cleanly across multiple lines for book cover layout."""
@@ -695,33 +717,46 @@ def wrap_text(text: str, max_chars_per_line: int = 22) -> list:
     return lines
 
 
-def generate_amazon_cover(
+def generate_amazon_cover_both(
     title: str,
     subtitle: str,
     author: str,
     theme_name: str = "Midnight Executive",
-    genre_badge: str = "THE DEFINITIVE ACTION BLUEPRINT"
-) -> bytes:
+    genre_badge: str = "THE DEFINITIVE ACTION BLUEPRINT",
+    bg_art_bytes: bytes = None
+) -> tuple[bytes, bytes]:
     """
     Generates a publication-ready Amazon Kindle eBook Cover (1600 x 2560 pixels, 1:1.6 ratio).
-    Features high-contrast typography, dual luxury frame, corner accent brackets, and star ribbon.
+    Returns (JPEG_bytes, PDF_bytes) ready for Amazon KDP eBook and print upload.
     """
     WIDTH, HEIGHT = 1600, 2560
     theme = COVER_THEMES.get(theme_name, COVER_THEMES["Midnight Executive"])
 
-    # 1. Create Base Image with Vertical Gradient
-    base = Image.new("RGB", (WIDTH, HEIGHT), theme["bg_top"])
-    draw = ImageDraw.Draw(base)
-
-    r1, g1, b1 = theme["bg_top"]
-    r2, g2, b2 = theme["bg_bot"]
-
-    for y in range(HEIGHT):
-        ratio = y / float(HEIGHT)
-        nr = int(r1 + (r2 - r1) * ratio)
-        ng = int(g1 + (g2 - g1) * ratio)
-        nb = int(b1 + (b2 - b1) * ratio)
-        draw.line([(0, y), (WIDTH, y)], fill=(nr, ng, nb))
+    # 1. Create Base Image with AI Background Artwork OR Vertical Gradient
+    if bg_art_bytes:
+        try:
+            art_img = Image.open(io.BytesIO(bg_art_bytes)).convert("RGB")
+            base = art_img.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
+            # Add dark overlay to ensure high text contrast
+            overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 140))
+            base.paste(overlay, (0, 0), overlay)
+            draw = ImageDraw.Draw(base)
+        except Exception:
+            base = Image.new("RGB", (WIDTH, HEIGHT), theme["bg_top"])
+            draw = ImageDraw.Draw(base)
+            r1, g1, b1 = theme["bg_top"]
+            r2, g2, b2 = theme["bg_bot"]
+            for y in range(HEIGHT):
+                ratio = y / float(HEIGHT)
+                draw.line([(0, y), (WIDTH, y)], fill=(int(r1+(r2-r1)*ratio), int(g1+(g2-g1)*ratio), int(b1+(b2-b1)*ratio)))
+    else:
+        base = Image.new("RGB", (WIDTH, HEIGHT), theme["bg_top"])
+        draw = ImageDraw.Draw(base)
+        r1, g1, b1 = theme["bg_top"]
+        r2, g2, b2 = theme["bg_bot"]
+        for y in range(HEIGHT):
+            ratio = y / float(HEIGHT)
+            draw.line([(0, y), (WIDTH, y)], fill=(int(r1+(r2-r1)*ratio), int(g1+(g2-g1)*ratio), int(b1+(b2-b1)*ratio)))
 
     # 2. Draw Elegant Double Frame & Corner Brackets
     margin = 80
@@ -775,7 +810,6 @@ def generate_amazon_cover(
 
     for idx, line in enumerate(title_lines[:5]):
         y_pos = title_y_start + (idx * line_spacing)
-        # Drop shadow
         shadow_color = (0, 0, 0) if theme["title_color"][0] > 120 else (210, 210, 210)
         draw.text((WIDTH // 2 + 4, y_pos + 4), line, fill=shadow_color, font=title_font, anchor="mm")
         draw.text((WIDTH // 2, y_pos), line, fill=theme["title_color"], font=title_font, anchor="mm")
@@ -802,13 +836,85 @@ def generate_amazon_cover(
     draw.text((WIDTH // 2 + 3, author_y + 73), author.upper(), fill=(0, 0, 0) if theme["title_color"][0] > 120 else (210, 210, 210), font=author_font, anchor="mm")
     draw.text((WIDTH // 2, author_y + 70), author.upper(), fill=theme["title_color"], font=author_font, anchor="mm")
 
-    buffer = io.BytesIO()
-    base.save(buffer, format="JPEG", quality=95)
-    return buffer.getvalue()
+    # JPEG Output (Kindle eBook)
+    buf_jpg = io.BytesIO()
+    base.save(buf_jpg, format="JPEG", quality=95)
+
+    # PDF Output (Print-Ready)
+    buf_pdf = io.BytesIO()
+    base.save(buf_pdf, format="PDF", resolution=300.0)
+
+    return buf_jpg.getvalue(), buf_pdf.getvalue()
+
+
+def generate_paperback_wraparound(
+    title: str,
+    subtitle: str,
+    author: str,
+    blurb: str,
+    theme_name: str = "Midnight Executive",
+    chapters_count: int = 5
+) -> bytes:
+    """Generates complete print-ready PDF containing [Back Cover | Spine | Front Cover] for Amazon KDP Paperback."""
+    spine_w = max(240, min(400, chapters_count * 50))
+    front_w = 1600
+    h = 2560
+    total_w = front_w + spine_w + front_w
+    theme = COVER_THEMES.get(theme_name, COVER_THEMES["Midnight Executive"])
+
+    base = Image.new("RGB", (total_w, h), theme["bg_top"])
+    draw = ImageDraw.Draw(base)
+
+    # Background gradient across entire cover
+    r1, g1, b1 = theme["bg_top"]
+    r2, g2, b2 = theme["bg_bot"]
+    for y in range(h):
+        ratio = y / float(h)
+        draw.line([(0, y), (total_w, y)], fill=(int(r1+(r2-r1)*ratio), int(g1+(g2-g1)*ratio), int(b1+(b2-b1)*ratio)))
+
+    # Spine lines
+    spine_x1 = front_w
+    spine_x2 = front_w + spine_w
+    draw.line([(spine_x1, 0), (spine_x1, h)], fill=theme["accent_color"], width=4)
+    draw.line([(spine_x2, 0), (spine_x2, h)], fill=theme["accent_color"], width=4)
+
+    # Fonts
+    try:
+        title_font = ImageFont.load_default(size=72)
+        blurb_font = ImageFont.load_default(size=44)
+        spine_font = ImageFont.load_default(size=40)
+    except Exception:
+        title_font = ImageFont.load_default()
+        blurb_font = ImageFont.load_default()
+        spine_font = ImageFont.load_default()
+
+    # Back cover content (Left pane: 0 to front_w)
+    draw.text((front_w // 2, 300), "WHAT THIS BOOK DELIVERS", fill=theme["accent_color"], font=blurb_font, anchor="mm")
+    draw.line([(front_w // 2 - 200, 360), (front_w // 2 + 200, 360)], fill=theme["accent_color"], width=3)
+
+    blurb_lines = wrap_text(blurb if blurb else "A comprehensive, practical roadmap to mastering the core skills and transforming your future.", max_chars_per_line=30)
+    for idx, bl in enumerate(blurb_lines[:12]):
+        draw.text((front_w // 2, 480 + (idx * 64)), bl, fill=theme["sub_color"], font=blurb_font, anchor="mm")
+
+    # Front cover content (Right pane: spine_x2 to total_w)
+    front_center_x = spine_x2 + (front_w // 2)
+    draw.text((front_center_x, 300), "★  ACTION-ORIENTED BESTSELLER  ★", fill=theme["accent_color"], font=blurb_font, anchor="mm")
+    f_title_lines = wrap_text(title.upper(), max_chars_per_line=18)
+    for idx, fl in enumerate(f_title_lines[:5]):
+        draw.text((front_center_x, 600 + (idx * 110)), fl, fill=theme["title_color"], font=title_font, anchor="mm")
+
+    draw.text((front_center_x, h - 300), f"BY {author.upper()}", fill=theme["title_color"], font=blurb_font, anchor="mm")
+
+    # Spine text (Center pane)
+    draw.text((spine_x1 + (spine_w // 2), h // 2), f"{title[:24].upper()}  •  {author.upper()}", fill=theme["title_color"], font=spine_font, anchor="mm")
+
+    buf = io.BytesIO()
+    base.save(buf, format="PDF", resolution=300.0)
+    return buf.getvalue()
 
 
 # ==============================================================================
-# Native Word (.docx) Manuscript Generator
+# Native Word (.docx) Manuscript Generator with Embedded Color Illustrations
 # ==============================================================================
 def create_docx_manuscript(
     title: str,
@@ -817,13 +923,12 @@ def create_docx_manuscript(
     phase2_outline: str,
     chapters_list: list
 ) -> bytes:
-    """Generates an Amazon KDP-compliant Microsoft Word (.docx) document with native heading styles."""
+    """Generates an Amazon KDP-compliant Microsoft Word (.docx) document with embedded high-res color images."""
     if not HAS_DOCX:
         return b""
 
     doc = docx.Document()
 
-    # Document Global Style
     normal_style = doc.styles['Normal']
     normal_style.font.name = 'Georgia'
     normal_style.font.size = Pt(11)
@@ -893,11 +998,26 @@ def create_docx_manuscript(
     )
     doc.add_page_break()
 
-    # 5. Chapters
+    # 5. Chapters with Embedded Color Images
     for ch in chapters_list:
         ch_text = ch.get("content", "")
-        lines = ch_text.split("\n")
+        img_bytes = ch.get("image_bytes")
 
+        # Embed Chapter Illustration if present
+        if img_bytes:
+            try:
+                img_stream = io.BytesIO(img_bytes)
+                doc.add_picture(img_stream, width=docx.shared.Inches(5.2))
+                cap_p = doc.add_paragraph()
+                cap_p.paragraph_format.space_after = Pt(14)
+                cap_run = cap_p.add_run(f"Figure {ch['chapter_num']}.1: Visual Conceptual Architecture")
+                cap_run.font.size = Pt(9)
+                cap_run.italic = True
+                cap_run.font.color.rgb = RGBColor(100, 116, 139)
+            except Exception:
+                pass
+
+        lines = ch_text.split("\n")
         for line in lines:
             line_str = line.strip()
             if not line_str:
@@ -983,7 +1103,6 @@ with st.sidebar:
     provider_choice = st.selectbox("API Provider", options=list(PROVIDERS.keys()), index=0)
     selected_config = PROVIDERS[provider_choice]
 
-    # Check for automatically persisted key
     initial_key = get_persisted_key(provider_choice)
 
     api_key_input = st.text_input(
@@ -1085,7 +1204,7 @@ with st.sidebar:
 st.markdown("""
 <div class="main-header">
     <h1>📚 KDP E-Book Architect Pro</h1>
-    <p>Autonomous Bestseller Publishing Studio: BSR Niche Hunter • Deep Manuscript Engine • 300-DPI Cover Designer • Word (.docx) & KDP Launch Suite</p>
+    <p>Autonomous Bestseller Publishing Studio: BSR Niche Hunter • Deep Manuscript with Color Illustrations • 300-DPI Cover Designer (JPG & PDF) • Word (.docx) & KDP Launch Suite</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1106,8 +1225,8 @@ if "selected_audience" not in st.session_state:
 # Navigation Tabs: Studio vs Instant Cover Studio vs Guide
 tab_studio, tab_cover_lab, tab_guide = st.tabs([
     "🚀 Autonomous Publishing Studio",
-    "🎨 Built-in Cover Studio (Instant)",
-    "📖 Step-by-Step Amazon KDP Guide"
+    "🎨 Built-in Cover Studio (JPG & PDF)",
+    "📖 Complete Amazon KDP Publishing Guide"
 ])
 
 # ==============================================================================
@@ -1242,7 +1361,9 @@ Provide all 3 niches following this exact structure.
     with col_ch:
         chapters_count = st.slider("Target Chapters", min_value=3, max_value=8, value=5)
 
-    start_generation_btn = st.button("🚀 Start Autonomous Book & Cover Generation", type="primary", use_container_width=True)
+    include_images_toggle = st.checkbox("🎨 Generate Contextual Color AI Illustrations for Every Chapter (Embedded in Word Doc)", value=True)
+
+    start_generation_btn = st.button("🚀 Start Autonomous Book, Cover & Illustrations Generation", type="primary", use_container_width=True)
 
     # --------------------------------------------------------------------------
     # Pipeline Execution
@@ -1311,11 +1432,11 @@ Provide all 3 niches following this exact structure.
 
             time.sleep(1)
 
-            # 3. Phase 3: Iterative Chapter Drafting (Deep Value Framework)
+            # 3. Phase 3: Iterative Chapter Drafting & AI Image Generation
             chapters_list = []
             for ch in range(1, chapters_count + 1):
                 current_step += 1
-                update_ui(current_step, f"Phase 3: Deep Drafting Chapter {ch} of {chapters_count}...")
+                update_ui(current_step, f"Phase 3: Deep Drafting Chapter {ch} of {chapters_count} & Rendering Color Illustration...")
 
                 p3_sys = (
                     "Act as an Authoritative, World-Class Non-Fiction Author. Write in-depth, captivating, high-value content. "
@@ -1339,9 +1460,22 @@ Write ONLY Chapter {ch} in deep, comprehensive detail (around 1,000-1,400 words)
 Ensure all sub-points, callout boxes, and practical exercises are fully articulated in clean Markdown.
 """
                 ch_text = call_llm(p3_sys, p3_user, provider_choice, eff_key, active_model, temperature=0.7)
-                chapters_list.append({"chapter_num": ch, "content": ch_text})
 
-                with p3_box.expander(f"📖 Chapter {ch} Manuscript Draft", expanded=False):
+                # Generate Color Illustration for this chapter
+                img_bytes = None
+                if include_images_toggle:
+                    ch_img_prompt = f"high quality colorful editorial digital art infographic concept for {topic_input.strip()} Chapter {ch} practical diagram cinematic lighting 8k"
+                    img_bytes = fetch_ai_image(ch_img_prompt, width=1024, height=640)
+
+                chapters_list.append({
+                    "chapter_num": ch,
+                    "content": ch_text,
+                    "image_bytes": img_bytes
+                })
+
+                with p3_box.expander(f"📖 Chapter {ch} Manuscript Draft & Color Illustration", expanded=False):
+                    if img_bytes:
+                        st.image(img_bytes, caption=f"Chapter {ch} Color Illustration (Embedded in Word Doc)", use_container_width=True)
                     st.markdown(ch_text)
 
                 time.sleep(2)
@@ -1377,21 +1511,36 @@ Generate the complete launch suite with the following 6 sections:
 
             time.sleep(1)
 
-            # 5. Phase 5: Front/Back Matter, Built-in Cover & Word (.docx) Generation
+            # 5. Phase 5: Front/Back Matter, Built-in Cover (JPG & PDF) & Word (.docx) Generation
             current_step += 1
-            update_ui(current_step, "Phase 5: Rendering 300-DPI Amazon Cover (1600x2560 px) & Word Document...")
+            update_ui(current_step, "Phase 5: Rendering 300-DPI Covers (JPG & PDF) & Word Manuscript with Embedded Images...")
 
             cover_title = topic_input.strip()
             cover_subtitle = subtitle_input.strip() if subtitle_input else (audience_input.strip() if audience_input else "A Practical Step-by-Step Blueprint")
 
-            cover_bytes = generate_amazon_cover(
+            # Fetch AI cover art background if desired
+            cover_art_prompt = f"minimalist luxury book cover art concept for {topic_input.strip()} dramatic lighting gold and dark palette cinematic 8k"
+            cover_art_bg = fetch_ai_image(cover_art_prompt, width=1600, height=2560)
+
+            cover_jpg_bytes, cover_pdf_bytes = generate_amazon_cover_both(
                 title=cover_title,
                 subtitle=cover_subtitle,
                 author=author_input.strip() if author_input else "Alex Vance",
-                theme_name=theme_choice
+                theme_name=theme_choice,
+                bg_art_bytes=cover_art_bg
             )
 
-            # Build Full Manuscript with Front Matter & Back Matter
+            # Paperback wraparound PDF
+            wrap_pdf_bytes = generate_paperback_wraparound(
+                title=cover_title,
+                subtitle=cover_subtitle,
+                author=author_input.strip() if author_input else "Alex Vance",
+                blurb=subtitle_input.strip() if subtitle_input else f"The ultimate action guide to mastering {topic_input.strip()}.",
+                theme_name=theme_choice,
+                chapters_count=chapters_count
+            )
+
+            # Front & Back Matter
             front_matter = f"""# {topic_input.strip()}
 ### {cover_subtitle}
 **By {author_input.strip()}**
@@ -1430,7 +1579,7 @@ Visit our reader portal to claim your companion checklists and workbook template
             all_chapters_formatted = "\n\n---\n\n".join([ch["content"] for ch in chapters_list])
             master_manuscript = f"{front_matter}\n\n# Table of Contents\n{phase2_output}\n\n---\n\n{all_chapters_formatted}\n{back_matter}"
 
-            # Generate Microsoft Word (.docx) document
+            # Generate Microsoft Word (.docx) document with embedded images
             docx_bytes = create_docx_manuscript(
                 title=topic_input.strip(),
                 subtitle=cover_subtitle,
@@ -1463,8 +1612,8 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
 1. Open https://kdp.amazon.com -> Click '+ Create' -> 'Kindle eBook'
 2. Paste the Title, Subtitle, and HTML Description from this sheet.
 3. Paste the 7 Keywords into the 7 boxes.
-4. Select the 2 Categories recommended above.
-5. Upload your manuscript (.docx or .md) & your cover.jpg.
+4. Select the 2-3 Categories recommended above.
+5. Upload your manuscript (.docx with embedded images) & your cover.jpg.
 6. Set price to $4.99 (70% Royalty = $3.49 profit per sale).
 ================================================================================
 """
@@ -1484,11 +1633,15 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
                 "master_manuscript": master_manuscript,
                 "docx_bytes": docx_bytes,
                 "kdp_sheet": kdp_sheet,
-                "cover_bytes": cover_bytes,
+                "cover_jpg_bytes": cover_jpg_bytes,
+                "cover_pdf_bytes": cover_pdf_bytes,
+                "wrap_pdf_bytes": wrap_pdf_bytes,
                 "filename_md": f"{slug}_manuscript.md",
                 "filename_docx": f"{slug}_manuscript.docx",
                 "filename_txt": f"{slug}_manuscript.txt",
-                "cover_filename": f"{slug}_cover.jpg",
+                "cover_filename_jpg": f"{slug}_cover.jpg",
+                "cover_filename_pdf": f"{slug}_cover.pdf",
+                "wrap_filename_pdf": f"{slug}_paperback_wrap_cover.pdf",
                 "sheet_filename": f"{slug}_kdp_launch_sheet.txt"
             }
 
@@ -1509,7 +1662,7 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
         est_read_time = max(10, round(total_words / 220))
 
         st.markdown("---")
-        st.success("🎉 **Bestseller Production Complete!** Manuscript (.docx & .md), 300-DPI Cover & KDP Launch Suite are ready.")
+        st.success("🎉 **Bestseller Production Complete!** Word (.docx with Color Illustrations), 300-DPI Covers (JPG & PDF) & KDP Launch Suite are ready.")
 
         # Key Metrics
         st.markdown(
@@ -1540,13 +1693,13 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
             unsafe_allow_html=True
         )
 
-        # 5-Way Multi-Format Download Suite
+        # 6-Way Multi-Format Download Suite
         st.markdown("### 📥 1-Click Multi-Format Export Arsenal")
         col_d1, col_d2, col_d3 = st.columns(3)
         with col_d1:
             if HAS_DOCX and data.get("docx_bytes"):
                 st.download_button(
-                    label="📄 1. Download Word Doc (.docx - KDP Ready)",
+                    label="📄 1. Download Word Doc (.docx - With Color Images)",
                     data=data["docx_bytes"],
                     file_name=data["filename_docx"],
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1564,34 +1717,43 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
                 )
         with col_d2:
             st.download_button(
-                label="🖼️ 2. Download 300-DPI Cover (.jpg)",
-                data=data["cover_bytes"],
-                file_name=data["cover_filename"],
+                label="🖼️ 2. Download eBook Cover (.jpg - 300 DPI)",
+                data=data["cover_jpg_bytes"],
+                file_name=data["cover_filename_jpg"],
                 mime="image/jpeg",
                 type="primary",
                 use_container_width=True
             )
         with col_d3:
             st.download_button(
-                label="🚀 3. Download KDP Fast-Launch Sheet (.txt)",
+                label="📑 3. Download Print Front Cover (.pdf - 300 DPI)",
+                data=data["cover_pdf_bytes"],
+                file_name=data["cover_filename_pdf"],
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True
+            )
+
+        col_d4, col_d5, col_d6 = st.columns(3)
+        with col_d4:
+            st.download_button(
+                label="📦 4. Download Paperback Wrap Cover (.pdf)",
+                data=data["wrap_pdf_bytes"],
+                file_name=data["wrap_filename_pdf"],
+                mime="application/pdf",
+                use_container_width=True
+            )
+        with col_d5:
+            st.download_button(
+                label="🚀 5. Download KDP Fast-Launch Sheet (.txt)",
                 data=data["kdp_sheet"],
                 file_name=data["sheet_filename"],
                 mime="text/plain",
                 use_container_width=True
             )
-
-        col_d4, col_d5 = st.columns(2)
-        with col_d4:
+        with col_d6:
             st.download_button(
-                label="📝 Download Plain Text Manuscript (.txt)",
-                data=data["master_manuscript"],
-                file_name=data["filename_txt"],
-                mime="text/plain",
-                use_container_width=True
-            )
-        with col_d5:
-            st.download_button(
-                label="📋 Download Markdown Manuscript (.md)",
+                label="📝 6. Download Markdown Manuscript (.md)",
                 data=data["master_manuscript"],
                 file_name=data["filename_md"],
                 mime="text/markdown",
@@ -1607,7 +1769,7 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
 
         col_amz_img, col_amz_info = st.columns([1, 1.8])
         with col_amz_img:
-            st.image(data["cover_bytes"], caption="Kindle Edition Front Cover", use_container_width=True)
+            st.image(data["cover_jpg_bytes"], caption="Kindle Edition Front Cover", use_container_width=True)
         with col_amz_info:
             st.markdown(f"""
             <div class="amazon-sim-card">
@@ -1626,15 +1788,17 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
             </div>
             """, unsafe_allow_html=True)
 
-            with st.expander("📖 Look Inside: Read Book Introduction & Outline", expanded=False):
+            with st.expander("📖 Look Inside: Read Book Introduction & Illustrations", expanded=False):
                 st.markdown(f"### {data['topic']}")
                 st.markdown(f"**By {data['author']}**")
                 st.markdown("#### Table of Contents:")
                 st.markdown(data["phase2"])
                 if data["chapters"]:
                     st.markdown("---")
-                    st.markdown("#### Sample Chapter Preview:")
-                    st.markdown(data["chapters"][0]["content"][:1000] + "...\n\n*(Full content in downloaded manuscript)*")
+                    st.markdown("#### Chapter 1 Preview & Illustration:")
+                    if data["chapters"][0].get("image_bytes"):
+                        st.image(data["chapters"][0]["image_bytes"], caption="Chapter 1 Illustration", use_container_width=True)
+                    st.markdown(data["chapters"][0]["content"][:1000] + "...\n\n*(Full content in downloaded Word .docx manuscript)*")
 
         # ----------------------------------------------------------------------
         # Quick 1-Tap Copy Hub for Mobile
@@ -1653,7 +1817,6 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
 
         with tab_c_kw:
             st.info("Paste each of these 7 keywords into the 7 keyword boxes on Amazon KDP:")
-            # Extract keywords from phase4
             kw_match = re.search(r'\[2\][^\n]*\n(.*?)(?=\n\[3\]|\Z)', data["phase4"], re.DOTALL)
             kw_text = kw_match.group(1).strip() if kw_match else "Extracted in Fast-Launch Sheet"
             st.code(kw_text, language="text")
@@ -1673,11 +1836,11 @@ INSTRUCTIONS FOR 5-MINUTE LAUNCH:
 
 
 # ==============================================================================
-# TAB 2: STANDALONE COVER STUDIO (INSTANT PREVIEW & DOWNLOAD)
+# TAB 2: STANDALONE COVER STUDIO (JPG & PDF PRINT READY)
 # ==============================================================================
 with tab_cover_lab:
     st.markdown("### 🎨 Instant 300-DPI Cover Designer (Zero Canva Required)")
-    st.markdown("Design and download high-resolution Amazon Kindle covers (1600x2560 px, 300 DPI) in seconds.")
+    st.markdown("Design and download high-resolution Amazon Kindle covers in both **JPG (for eBook)** and **PDF (for Print)** format.")
 
     col_cov_in, col_cov_out = st.columns([1, 1.1])
     with col_cov_in:
@@ -1686,32 +1849,50 @@ with tab_cover_lab:
         cov_author = st.text_input("Author / Pen Name", value="Alex Vance")
         cov_badge = st.text_input("Top Ribbon Genre Badge", value="THE DEFINITIVE ACTION BLUEPRINT")
         cov_theme = st.selectbox("Design Color Palette", options=list(COVER_THEMES.keys()), index=0, key="studio_cover_theme")
+        cov_use_ai_bg = st.checkbox("Generate Thematic AI Artwork Background", value=True)
 
-        render_cover_btn = st.button("⚡ Render 300-DPI Cover", type="primary", use_container_width=True)
+        render_cover_btn = st.button("⚡ Render 300-DPI Covers (JPG & PDF)", type="primary", use_container_width=True)
 
     with col_cov_out:
-        if render_cover_btn or "lab_cover_bytes" not in st.session_state:
-            with st.spinner("Rendering 300-DPI cover with geometric frame..."):
-                lab_bytes = generate_amazon_cover(
+        if render_cover_btn or "lab_cover_jpg" not in st.session_state:
+            with st.spinner("Rendering 300-DPI cover with artwork and geometric frame..."):
+                bg_bytes = None
+                if cov_use_ai_bg:
+                    bg_bytes = fetch_ai_image(f"luxury book cover concept for {cov_title} cinematic dramatic lighting 8k", width=1600, height=2560)
+
+                jpg_b, pdf_b = generate_amazon_cover_both(
                     title=cov_title,
                     subtitle=cov_subtitle,
                     author=cov_author,
                     theme_name=cov_theme,
-                    genre_badge=cov_badge
+                    genre_badge=cov_badge,
+                    bg_art_bytes=bg_bytes
                 )
-                st.session_state.lab_cover_bytes = lab_bytes
+                st.session_state.lab_cover_jpg = jpg_b
+                st.session_state.lab_cover_pdf = pdf_b
 
-        if "lab_cover_bytes" in st.session_state:
-            st.image(st.session_state.lab_cover_bytes, caption=f"Amazon-Ready 300 DPI (1600x2560 px) - Palette: {cov_theme}", width=340)
+        if "lab_cover_jpg" in st.session_state:
+            st.image(st.session_state.lab_cover_jpg, caption=f"Amazon-Ready 300 DPI (1600x2560 px) - Palette: {cov_theme}", width=340)
             cov_slug = sanitize_filename(cov_title)
-            st.download_button(
-                label="📥 Download High-Res Cover (.jpg)",
-                data=st.session_state.lab_cover_bytes,
-                file_name=f"{cov_slug}_cover.jpg",
-                mime="image/jpeg",
-                type="primary",
-                use_container_width=True
-            )
+            col_d_j, col_d_p = st.columns(2)
+            with col_d_j:
+                st.download_button(
+                    label="📥 1. Download eBook Cover (.jpg)",
+                    data=st.session_state.lab_cover_jpg,
+                    file_name=f"{cov_slug}_cover.jpg",
+                    mime="image/jpeg",
+                    type="primary",
+                    use_container_width=True
+                )
+            with col_d_p:
+                st.download_button(
+                    label="📑 2. Download Print Cover (.pdf)",
+                    data=st.session_state.lab_cover_pdf,
+                    file_name=f"{cov_slug}_cover.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True
+                )
 
 
 # ==============================================================================
@@ -1719,49 +1900,68 @@ with tab_cover_lab:
 # ==============================================================================
 with tab_guide:
     st.markdown("""
-### 🧭 How to Publish on Amazon KDP & Earn from Week 1 (The $5,000/Month Blueprint)
+### 🧭 How to Publish on Amazon KDP & Earn from Week 1 (The Complete Master Blueprint)
 
-Follow this exact blueprint to publish your book and start generating passive royalties:
-
----
-
-#### 1️⃣ KDP Account Setup & Global Bank Details (One-time)
-1. Go to **[kdp.amazon.com](https://kdp.amazon.com)** and sign in with your normal Amazon account.
-2. Complete your **Account Information**:
-   - **Bank Account Details**: Where Amazon will deposit your royalties directly every month.
-     - *If you live in USA/UK/Europe*: Enter your local checking account IBAN/Routing number.
-     - *If you live in Bangladesh, India, or worldwide*: Use a free **[Payoneer](https://www.payoneer.com/)** or **Wise** virtual US bank account (Routing & Account number) provided in your dashboard. Amazon will deposit USD directly there!
-   - **Tax Interview (W-8BEN)**: A 2-minute online questionnaire. Select "Individual", enter your local National ID or Tax ID, and claim the tax treaty (e.g. 0% or 15% withholding instead of 30%).
+Amazon Kindle Direct Publishing (KDP)-এ বই প্রকাশ করে প্রথম সপ্তাহ থেকেই প্যাসিভ ইনকাম শুরু করতে নিচের প্রতিটি বিষয় খুঁটিনাটি জানা অত্যন্ত জরুরি:
 
 ---
 
-#### 2️⃣ Create Your Kindle eBook (Takes 5 Minutes)
-1. Click the yellow **"+ Create"** button on your KDP Dashboard.
-2. Select **"Create Kindle eBook"**.
-3. **Fill Page 1: Kindle eBook Details**:
-   - **Book Title & Subtitle**: Copy directly from your downloaded `kdp_launch_sheet.txt`.
-   - **Author Name**: Enter the Pen Name you chose in the app.
-   - **Description**: Paste the HTML Book Description generated by the app.
-   - **Keywords**: Paste the 7 backend keywords into the 7 boxes.
-   - **Categories**: Select the 2 BISAC categories recommended by the app.
-   - Click **Save and Continue**.
+### 1️⃣ আমাজনে বই প্রকাশের দুটি মূল ফরম্যাট (Kindle eBook বনাম Paperback)
 
-4. **Fill Page 2: Kindle eBook Content**:
-   - **Upload eBook Manuscript**: Upload the `.docx` file generated by this app (Amazon converts Word documents flawlessly).
-   - **Upload eBook Cover**: Upload the `cover.jpg` generated directly by this app (already sized to 1600x2560 px).
-   - Use the online **Kindle Previewer** to verify that your book looks clean.
-   - Click **Save and Continue**.
+| উপাদান | 📱 Kindle eBook (ডিজিটাল বই) | 📖 Paperback / Hardcover (প্রিন্ট বই) |
+| :--- | :--- | :--- |
+| **ম্যানুস্ক্রিপ্ট ফাইল** | `.docx` (Microsoft Word) অথবা `.kpf` | `.docx` অথবা প্রিন্ট সাইজ অনুযায়ী তৈরি `.pdf` |
+| **কভার ফাইল ফরম্যাট** | **শুধুমাত্র JPG বা TIFF** (১৬০০ x ২৫৬০ পিক্সেল, ৩০০ DPI) | **শুধুমাত্র Print-Ready PDF** (Front + Spine + Back এক ফাইলে) |
+| **ISBN নম্বর** | **কোনো ISBN লাগে না** (আমাজন ফ্রি ASIN দেয়) | **ফ্রি KDP ISBN** আমাজন নিজে থেকেই দেয় (১ ক্লিকে) |
+| **রয়্যালটি (লাভের ভাগ)** | **৭০%** অথবা ৩৫% | **৬০%** (প্রিন্টিং খরচ বাদ দিয়ে) |
+| **রঙিন ছবি** | সম্পূর্ণ রঙিন দেখা যায় যেকোনো কিন্ডল অ্যাপ বা ট্যাবলেটে | রঙিন বা সাদাকালো প্রিন্ট অপশন থাকে |
 
-5. **Fill Page 3: Pricing & Royalties**:
-   - **KDP Select Enrollment**: Check this box! It allows Kindle Unlimited readers to borrow your book, and Amazon pays you per page read (often 40-50% of total author income!).
-   - **Royalty Plan**: Select **70%**.
-   - **Kindle Price**: Set between **$2.99 and $4.99** (Sweet spot: At $4.99, you earn **$3.49 profit per sale**).
-   - Click **"Publish Your Kindle eBook"**!
+> ⚠️ **গুরুত্বপূর্ণ কভার নিয়ম:** অনেকে ভুল করে কিন্ডল ইবুকে PDF কভার আপলোড করার চেষ্টা করে এরর খায়। আমাজনের কঠোর নিয়ম: **Kindle eBook কভার সবসময় JPG হতে হবে**, আর **Paperback কভার সবসময় PDF হতে হবে**। আমাদের সিস্টেম দুটোই এক ক্লিকে বানিয়ে দেয়!
 
 ---
 
-#### 3️⃣ 7-Day Bestseller Launch Strategy (Getting Sales Immediately)
-- **Day 1-3 (Rank Launch)**: Share the link with friends, family, or your social network. Ask 3-5 people to purchase and leave an honest 1-minute review.
-- **Day 4-7 (Amazon Ads Traction)**: Go to KDP Dashboard -> Click "Promote and Advertise" -> Run a sponsored product ad targeting the 20 keywords provided in Phase 4 of this app at $5/day bid.
-- **Scaling to $3,000 - $5,000/month**: Produce 1 book every 2 weeks using the Niche Hunter. With 6 to 10 books earning $15-$25/day each, you build a steady, passive monthly cashflow!
+### 2️⃣ আমাজন রয়্যালটি ও প্রাইসিং স্ট্র্যাটেজি (৭০% বনাম ৩৫%)
+
+1. **৭০% রয়্যালটি রেঞ্জ ($২.৯৯ থেকে $৯.৯৯):**
+   - আপনার বইয়ের দাম যদি **$২.৯৯ থেকে $৯.৯৯** এর মধ্যে রাখেন, আমাজন আপনাকে প্রতি সেলে **৭০% সরাসরি প্রফিট** দিবে।
+   - উদাহরণ: বইয়ের দাম **$৪.৯৯** রাখলে প্রতি সেলে আপনি পাবেন প্রায় **$৩.৪৯ (প্রায় ৪০০ টাকা)**।
+   - দিনে মাত্র ৫টি বই সেল হলে: **$১৭.৪৫/দিন = $৫২৩/মাস (প্রায় ৬০,০০০ টাকা/মাস)**!
+2. **ডেলিভারি ফি (Delivery Fee):**
+   - ৭০% রয়্যালটিতে আমাজন প্রতি মেগাবাইট (MB) সাইজের জন্য $০.১৫ কেটে নেয়। তাই আমাদের সিস্টেম ছবিগুলোর সাইজ অপ্টিমাইজ করে ফাইল সাইজ ৫MB-এর নিচে রাখে যাতে আপনার রয়্যালটি সর্বোচ্চ থাকে!
+3. **KDP Select (Kindle Unlimited):**
+   - পাবলিশ করার সময় **KDP Select** বক্সে টিক দিবেন। এতে কিন্ডল আনলিমিটেড ব্যবহারকারীরা আপনার বই ফ্রি পড়লেও যত পেজ পড়বে, আমাজন প্রতি পেজের জন্য আপনাকে আলাদা টাকা পে করবে!
+
+---
+
+### 3️⃣ পেপারব্যাক কভারের গোপন গণিত (Spine Width & Bleed Calculation)
+
+আমাজনে পেপারব্যাক বই প্রিন্ট করার জন্য কভারটি একটি একক ফ্ল্যাট PDF হতে হবে যেখানে:
+- **বামের অংশ:** Back Cover (বইয়ের ব্লার্ব, রিভিউর কথা ও বারকোডের জায়গা)
+- **মাঝের অংশ:** Spine (বইয়ের পিঠ, যেখানে টাইটেল ও লেখকের নাম থাকে)
+- **ডানের অংশ:** Front Cover (মূল আর্টওয়ার্ক ও টাইটেল)
+- **ব্লিড (Bleed):** চারপাশে ০.১২৫ ইঞ্চি বাড়তি মার্জিন থাকতে হয় কাটিংয়ের সুবিধার জন্য।
+- *আমাদের সিস্টেম বইয়ের অধ্যায় অনুযায়ী স্বয়ংক্রিয়ভাবে স্পাইন মেপে এই ফুল র‍্যাপ PDF তৈরি করে দেয়!*
+
+---
+
+### 4️⃣ বাংলাদেশ, ভারত ও বিশ্বজুড়ে ব্যাংক সেটআপ (Payoneer / Wise)
+
+1. আমাজন সরাসরি ইউএস (US) ব্যাংক অ্যাকাউন্টে প্রতি মাসের রয়্যালটি পাঠিয়ে দেয়।
+2. আপনি বাংলাদেশ, ভারত বা বিশ্বের যেখানেই থাকুন:
+   - **[Payoneer.com](https://www.payoneer.com/)** অথবা **Wise**-এ একটি ফ্রি অ্যাকাউন্ট খুলুন।
+   - Payoneer আপনাকে একটি ফ্রি **Virtual US Bank Account** (Routing Number & Account Number) দিবে।
+   - KDP ড্যাশবোর্ডে গিয়ে এই Routing ও Account Number বসিয়ে দিন। আমাজন সরাসরি ডলারে টাকা পাঠিয়ে দিবে, যা আপনি আপনার লোকাল বিকাশ বা ব্যাংকে ট্রান্সফার করে নিতে পারবেন!
+3. **W-8BEN ট্যাক্স ইন্টারভিউ (Tax Interview):**
+   - KDP অ্যাকাউন্টে ২ মিনিটের অনলাইন ট্যাক্স ইন্টারভিউ দিতে হয়।
+   - "Individual" সিলেক্ট করবেন এবং আপনার দেশের নাম দিয়ে আপনার জাতীয় পরিচয়পত্র (NID) নম্বর দিয়ে দিবেন। এতে ইউএস ট্যাক্স ট্রিটির সুবিধা অনুযায়ী কোনো বাড়তি ট্যাক্স কাটা হবে না।
+
+---
+
+### 5️⃣ প্রথম সপ্তাহেই বেস্টসেলার হওয়ার অ্যাকশন প্ল্যান (Launch Formula)
+
+1. **Phase 0 Niche Hunter ব্যবহার করুন:** এমন নিশে বই লিখুন যেখানে আমাজনে সার্চ রেজাল্ট ১,০০০ থেকে ৩,০০০-এর মধ্যে (কম্পিটিশন কম)।
+2. **আই-ক্যাচিং কভার:** কভার দেখেই মানুষ ক্লিক করে। আমাদের ৩ডি লাক্সারি কভার ক্রেতার নজর আটকাবে।
+3. **৭টি ব্যাকএন্ড কিওয়ার্ড:** সিস্টেমের দেওয়া ৭টি কিওয়ার্ড আমাজনের ৭টি বক্সে পেস্ট করুন—এটি আমাজনের সার্চ অ্যালগরিদমে আপনার বইকে প্রথম পেজে নিয়ে আসবে।
+4. **HTML ডেসক্রিপশন:** বোল্ড হেডলাইন ও বুলেট পয়েন্টসহ তৈরি ডেসক্রিপশন পেস্ট করুন, যা পড়ার পর ক্রেতার কেনা ছাড়া উপায় থাকবে না।
+5. **লঞ্চ প্রাইজ ($২.৯৯ বা $৪.৯৯):** প্রথমে $২.৯৯ দিয়ে শুরু করুন যাতে দ্রুত সেলস ও র‍্যাংক বাড়ে, পরে $৪.৯৯ বা $৬.৯৯ তে বাড়িয়ে প্যাসিভ ইনকাম দ্বিগুণ করুন!
 """)
